@@ -1,13 +1,1 @@
-{
-  "projects": [
-    {
-      "rootDirectory": "frontend"
-    }
-  ],
-  "build": {
-    "env": {
-      "VITE_SLACK_CLIENT_ID": "@slack_client_id",
-      "VITE_SLACK_REDIRECT_URI": "@slack_redirect_uri"
-    }
-  }
-}
+{}

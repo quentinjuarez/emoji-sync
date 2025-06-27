@@ -50,7 +50,9 @@ app.get('/slack/callback', async (req, res) => {
     emojiStore[tokenData.team.id] = emojiData.emoji;
 
     // Redirige vers front
-    res.redirect('http://localhost:3102/emojis?team_id=' + tokenData.team.id);
+    res.redirect(
+      process.env.FRONT_URL + '/emojis?team_id=' + tokenData.team.id
+    );
   } catch (err) {
     console.error(err);
     res.status(500).send('Server error');

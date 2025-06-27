@@ -46,7 +46,9 @@ onMounted(async () => {
   const url = new URL(window.location.href);
   const teamId = url.searchParams.get('team_id');
   if (teamId) {
-    const res = await fetch(`http://localhost:3101/api/emojis/${teamId}`);
+    const res = await fetch(
+      `${import.meta.env.VITE_BACK_URL}/api/emojis/${teamId}`
+    );
     emojis.value = await res.json();
   }
 });

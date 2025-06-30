@@ -1,11 +1,10 @@
 import dotenv from 'dotenv';
 import express from 'express';
-import fetch from 'node-fetch';
 import cors from 'cors';
 
 import gitlabRouter from './integrations/gitlab.js';
 import slackRouter from './integrations/slack.js';
-import { tokens } from './store.js';
+import { emojis, tokens } from './store.js';
 
 dotenv.config();
 
@@ -19,7 +18,10 @@ app.use('/gitlab', gitlabRouter);
 app.use('/slack', slackRouter);
 
 app.get('/debug', (req, res) => {
-  res.json(tokens);
+  res.json({
+    tokens,
+    emojis,
+  });
 });
 
 app.listen(PORT, () => {

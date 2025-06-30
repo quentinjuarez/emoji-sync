@@ -3,7 +3,7 @@ import fetch from 'node-fetch';
 
 const router = express.Router();
 
-import { emojiStore, tokens } from '../store.js';
+import { emojis, tokens } from '../store.js';
 
 router.get('/callback', async (req, res) => {
   const code = req.query.code;
@@ -30,7 +30,37 @@ router.get('/callback', async (req, res) => {
         .json({ error: 'OAuth failed', details: tokenData });
     }
 
-    tokens.gitlab[tokenData.user_id] = tokenData;
+    // get user info
+    const userRes = await fetch('https://gitlab.com/api/v4/user', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+
+    const userData = await userRes.json();
+    if (!userData.id) {
+      return res.status(400).json({ error: 'Failed to fetch user info' });
+    }
+
+    // store token with user info
+    tokenData.user = userData;
+
+    // get group info
+    const groupRes = await fetch(
+      'https://gitlab.com/api/v4/groups?min_access_level=30',
+      {
+        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      }
+    );
+
+    const groupData = await groupRes.json();
+    if (!Array.isArray(groupData) || groupData.length === 0) {
+      return res.status(400).json({ error: 'No accessible groups found' });
+    }
+
+    tokenData.groups = groupData.map((group) => group.full_path);
+
+    groupData.forEach((group) => {
+      tokens.gitlab[group.full_path] = tokenData;
+    });
 
     const b64Token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
 
@@ -46,28 +76,57 @@ router.get('/emojis', async (req, res) => {
     const groupPath = req.query.groupPath;
     if (!groupPath) return res.status(400).send('Missing groupPath');
 
+    // use cached emojis if available
+    if (emojis.gitlab[groupPath]) {
+      return res.json(emojis.gitlab[groupPath]);
+    }
+
     const accessToken = tokens.gitlab[groupPath]?.access_token;
 
     if (!accessToken) {
       return res.status(401).send('Unauthorized: No access token found');
     }
 
-    const emojiRes = await fetch(
-      'https://gitlab.com/api/v4/groups/' +
-        encodeURIComponent(groupPath) +
-        '/custom_emojis',
-      {
-        headers: { Authorization: `Bearer ${accessToken}` },
+    const query = `query GetCustomEmoji($groupPath: ID!) {
+      group(fullPath: $groupPath) {
+        id
+        customEmoji {
+          nodes {
+            name
+            url
+          }
+        }
       }
-    );
+    }`;
+
+    const emojiRes = await fetch('https://gitlab.com/api/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        query,
+        variables: { groupPath },
+      }),
+    });
 
     const emojiData = await emojiRes.json();
-    if (!emojiData.ok)
-      return res.status(500).send('Emoji error: ' + emojiData.error);
 
-    emojiStore.gitlab[groupPath] = emojiData;
+    if (!emojiData || !emojiData.data)
+      throw new Error(emojiData.errors || 'No data returned');
 
-    res.json(emojiData);
+    const emojisList = emojiData.data.group.customEmoji.nodes.reduce(
+      (acc, emoji) => {
+        acc[emoji.name] = emoji.url;
+        return acc;
+      },
+      {}
+    );
+
+    emojis.gitlab[groupPath] = emojisList;
+
+    res.json(emojisList);
   } catch (error) {
     console.error('Error fetching GitLab emojis:', error);
     res.status(500).send('Error fetching GitLab emojis');

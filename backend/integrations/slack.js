@@ -1,7 +1,7 @@
 import express from 'express';
 import fetch from 'node-fetch';
 
-import { emojiStore, tokens } from '../store.js';
+import { emojis, tokens } from '../store.js';
 
 const router = express.Router();
 
@@ -41,6 +41,11 @@ router.get('/emojis', async (req, res) => {
     const teamId = req.query.teamId;
     if (!teamId) return res.status(400).send('Missing teamId');
 
+    // use cached emojis if available
+    if (emojis.slack[teamId]) {
+      return res.json(emojis.slack[teamId]);
+    }
+
     const accessToken = tokens.slack[teamId]?.access_token;
 
     if (!accessToken) {
@@ -56,7 +61,7 @@ router.get('/emojis', async (req, res) => {
     if (!emojiData.ok)
       return res.status(500).send('Emoji error: ' + emojiData.error);
 
-    emojiStore.slack[teamId] = emojiData.emoji;
+    emojis.slack[teamId] = emojiData.emoji;
 
     res.json(emojiData.emoji);
   } catch (error) {

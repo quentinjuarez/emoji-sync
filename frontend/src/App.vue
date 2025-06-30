@@ -6,21 +6,11 @@
       <a :href="slackOAuthUrl" class="bg-blue-600 text-white px-4 py-2 rounded">
         Get emojis from Slack
       </a>
-
-      <!-- <a
-        href="https://slack.com/oauth/v2/authorize?client_id=7105649663652.9114575314594&scope=emoji:read&user_scope="
-        ><img
-          alt="Add to Slack"
-          height="40"
-          width="139"
-          src="https://platform.slack-edge.com/img/add_to_slack.png"
-          srcSet="https://platform.slack-edge.com/img/add_to_slack.png 1x, https://platform.slack-edge.com/img/add_to_slack@2x.png 2x"
-      /></a> -->
     </div>
 
     <div v-else>
       <h2 class="text-xl mb-2">Emojis :</h2>
-      <div class="grid grid-cols-4 gap-2">
+      <div class="grid grid-cols-4 gap-2 mb-6">
         <div
           v-for="(url, name) in emojis"
           :key="name"
@@ -38,18 +28,35 @@
 import { ref, onMounted } from 'vue';
 
 const emojis = ref<Record<string, string> | null>(null);
+
 const slackOAuthUrl = `https://slack.com/oauth/v2/authorize?client_id=${
   import.meta.env.VITE_SLACK_CLIENT_ID
 }&scope=emoji:read&redirect_uri=${import.meta.env.VITE_SLACK_REDIRECT_URI}`;
 
+// const gitlabOAuthUrl = `https://gitlab.com/oauth/authorize?client_id=${
+//   import.meta.env.VITE_GITLAB_CLIENT_ID
+// }&redirect_uri=${
+//   import.meta.env.VITE_GITLAB_REDIRECT_URI
+// }&response_type=code&scope=api`;
+
 onMounted(async () => {
   const url = new URL(window.location.href);
-  const teamId = url.searchParams.get('team_id');
-  if (teamId) {
-    const res = await fetch(
-      `${import.meta.env.VITE_BACK_URL}/api/emojis/${teamId}`
-    );
-    emojis.value = await res.json();
+  const token = url.searchParams.get('token');
+
+  if (!token) return;
+  try {
+    const base64Token = atob(token || '');
+    const tokenData = JSON.parse(base64Token);
+    const teamId = tokenData.team?.id;
+    if (teamId) {
+      console.log('Fetching emojis for team:', teamId);
+      const res = await fetch(
+        `${import.meta.env.VITE_BACK_URL}/slack/emojis?teamId=${teamId}`
+      );
+      emojis.value = await res.json();
+    }
+  } catch (error) {
+    console.error('Error decoding token:', error);
   }
 });
 </script>

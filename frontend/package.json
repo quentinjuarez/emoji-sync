@@ -7,7 +7,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "vue": "^3.4.0"
+    "@primeuix/themes": "^1.1.2",
+    "@primevue/auto-import-resolver": "^4.3.5",
+    "primeicons": "^7.0.0",
+    "primevue": "^4.3.5",
+    "unplugin-auto-import": "^19.3.0",
+    "unplugin-vue-components": "^28.8.0",
+    "vue": "^3.4.0",
+    "vue-router": "^4.5.1"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.0.0",

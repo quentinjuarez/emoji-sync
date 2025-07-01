@@ -13,7 +13,10 @@ declare module 'vue' {
     DataTable: typeof import('primevue/datatable')['default']
     Dialog: typeof import('primevue/dialog')['default']
     Dropdown: typeof import('primevue/dropdown')['default']
+    Integrations: typeof import('./../components/Integrations.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
+    Sync: typeof import('./../components/Sync.vue')['default']
+    SyncPoc: typeof import('./../components/SyncPoc.vue')['default']
   }
 }

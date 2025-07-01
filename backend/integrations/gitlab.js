@@ -92,6 +92,7 @@ router.get('/emojis', async (req, res) => {
         id
         customEmoji {
           nodes {
+            id
             name
             url
           }
@@ -116,6 +117,8 @@ router.get('/emojis', async (req, res) => {
     if (!emojiData || !emojiData.data)
       throw new Error(emojiData.errors || 'No data returned');
 
+    console.log(emojiData.data.group.customEmoji.nodes);
+
     const emojisList = emojiData.data.group.customEmoji.nodes.reduce(
       (acc, emoji) => {
         acc[emoji.name] = emoji.url;
@@ -133,14 +136,22 @@ router.get('/emojis', async (req, res) => {
   }
 });
 
-router.post('/sync', async (req, res) => {
-  const { groupPath, name, url } = req.body;
-
-  if (!groupPath || !name || !url) {
-    return res.status(400).send('Missing groupPath, name, or url');
-  }
-
+router.post('/emoji', async (req, res) => {
   try {
+    const { groupPath, name, url } = req.body;
+
+    console.log(req.body);
+
+    if (!groupPath || !name || !url) {
+      return res.status(400).send('Missing groupPath, name, or url');
+    }
+
+    const accessToken = tokens.gitlab[groupPath]?.access_token;
+
+    if (!accessToken) {
+      return res.status(401).send('Unauthorized: No access token found');
+    }
+
     const mutation = `
       mutation CreateCustomEmoji($groupPath: ID!) {
         createCustomEmoji(input: {
@@ -150,6 +161,7 @@ router.post('/sync', async (req, res) => {
         }) {
           clientMutationId
           customEmoji {
+            id  
             name
             url
           }
@@ -162,7 +174,7 @@ router.post('/sync', async (req, res) => {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.GITLAB_TOKEN}`,
+        Authorization: `Bearer ${accessToken}`,
       },
       body: JSON.stringify({
         query: mutation,
@@ -188,5 +200,90 @@ router.post('/sync', async (req, res) => {
     res.status(500).send('Server error');
   }
 });
+
+router.delete('/emoji', async (req, res) => {
+  try {
+    const { groupPath, emojiId } = req.body;
+
+    if (!groupPath || !emojiId) {
+      return res.status(400).send('Missing groupPath or emojiId');
+    }
+
+    const accessToken = tokens.gitlab[groupPath]?.access_token;
+
+    if (!accessToken) {
+      return res.status(401).send('Unauthorized: No access token found');
+    }
+
+    const mutation = `
+      mutation DestroyCustomEmoji($id: CustomEmojiID!) {
+        destroyCustomEmoji(input: { id: $id }) {
+          clientMutationId
+        }
+      }
+    `;
+
+    const gqlRes = await fetch('https://gitlab.com/api/graphql', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        query: mutation,
+        variables: { id: emojiId },
+      }),
+    });
+
+    const result = await gqlRes.json();
+    const mutationData = result.data?.destroyCustomEmoji;
+
+    if (result.errors || !mutationData) {
+      return res.status(400).json({
+        error: result.errors ?? 'Unknown error occurred',
+      });
+    }
+
+    if (mutationData.errors?.length > 0) {
+      return res.status(400).json({
+        error: mutationData.errors,
+      });
+    }
+
+    // Clear cached emojis for the group
+    if (emojis.gitlab[groupPath]) {
+      delete emojis.gitlab[groupPath];
+    }
+
+    res.json({
+      success: true,
+      message: `Emoji deleted successfully`,
+    });
+  } catch (err) {
+    console.error('GraphQL Error:', err);
+    res.status(500).send('Server error');
+  }
+});
+
+// delete errors found
+// [
+//     {
+//         "message": "The resource that you are attempting to access does not exist or you don't have permission to perform this action",
+//         "locations": [
+//             {
+//                 "line": 3,
+//                 "column": 9
+//             }
+//         ],
+//         "path": [
+//             "destroyCustomEmoji"
+//         ]
+//     }
+// ]
+
+// create errors found
+// [
+//     "Name has already been taken"
+// ]
 
 export default router;

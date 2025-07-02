@@ -3,11 +3,19 @@ import fetch from 'node-fetch';
 
 const router = express.Router();
 
-import { emojis, tokens } from '../store.js';
+import { emojis } from '../store.js'; // Removed tokens from here
 
-async function refreshToken(groupPath) {
-  const tokenData = tokens.gitlab[groupPath];
-  if (!tokenData || !tokenData.refresh_token) {
+// Helper function to extract token from Authorization header
+const extractToken = (req) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7); // Remove 'Bearer ' prefix
+  }
+  return null;
+};
+
+async function refreshToken(currentRefreshToken, groupPathForLog) {
+  if (!currentRefreshToken) {
     throw new Error('No refresh token available');
   }
 
@@ -18,33 +26,34 @@ async function refreshToken(groupPath) {
       body: new URLSearchParams({
         client_id: process.env.GITLAB_CLIENT_ID,
         client_secret: process.env.GITLAB_CLIENT_SECRET,
-        refresh_token: tokenData.refresh_token,
+        refresh_token: currentRefreshToken,
         grant_type: 'refresh_token',
-        redirect_uri: process.env.GITLAB_REDIRECT_URI, // Some OAuth providers require this
+        redirect_uri: process.env.GITLAB_REDIRECT_URI,
       }),
     });
 
     const newTokenData = await response.json();
     if (!newTokenData.access_token) {
-      console.error('Refresh token failed:', newTokenData);
-      // Remove invalid token so user has to re-auth
-      delete tokens.gitlab[groupPath];
+      console.error(
+        `Refresh token failed for group path hint ${groupPathForLog}:`,
+        newTokenData
+      );
       throw new Error('Failed to refresh token');
     }
 
-    // Update stored token, preserving user and groups info
-    tokens.gitlab[groupPath] = {
-      ...newTokenData,
-      user: tokenData.user,
-      groups: tokenData.groups,
-    };
-    console.log('Token refreshed successfully for group:', groupPath);
-    return tokens.gitlab[groupPath];
+    console.log(
+      'Token refreshed successfully using group path hint:',
+      groupPathForLog
+    );
+    // Important: The refreshed token data from GitLab might not include custom 'user' or 'groups' fields.
+    // The frontend will need to merge this new token data with existing user/group info.
+    return newTokenData; // Contains new access_token, refresh_token, expires_in etc.
   } catch (error) {
-    console.error('Error refreshing token:', error);
-    // Remove invalid token so user has to re-auth
-    delete tokens.gitlab[groupPath];
-    throw error; // Re-throw the error to be caught by the caller
+    console.error(
+      `Error refreshing token for group path hint ${groupPathForLog}:`,
+      error
+    );
+    throw error;
   }
 }
 
@@ -65,69 +74,77 @@ router.get('/callback', async (req, res) => {
       }),
     });
 
-    const tokenData = await tokenRes.json();
+    const tokenDataFromGitlab = await tokenRes.json();
 
-    if (!tokenData.access_token) {
+    if (!tokenDataFromGitlab.access_token) {
       return res
         .status(400)
-        .json({ error: 'OAuth failed', details: tokenData });
+        .json({ error: 'OAuth failed', details: tokenDataFromGitlab });
     }
 
-    // get user info
+    // Get user info using the new access token
     const userRes = await fetch('https://gitlab.com/api/v4/user', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+      headers: {
+        Authorization: `Bearer ${tokenDataFromGitlab.access_token}`,
+      },
     });
-
     const userData = await userRes.json();
     if (!userData.id) {
       return res.status(400).json({ error: 'Failed to fetch user info' });
     }
 
-    // store token with user info
-    tokenData.user = userData;
-
-    // get group info
+    // Get group info using the new access token
     const groupRes = await fetch(
-      'https://gitlab.com/api/v4/groups?min_access_level=30',
+      'https://gitlab.com/api/v4/groups?min_access_level=30', // Ensure user has at least developer access
       {
-        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+        headers: {
+          Authorization: `Bearer ${tokenDataFromGitlab.access_token}`,
+        },
       }
     );
-
     const groupData = await groupRes.json();
-    if (!Array.isArray(groupData) || groupData.length === 0) {
-      return res.status(400).json({ error: 'No accessible groups found' });
+    // It's okay if a user has no groups with custom emoji permissions,
+    // but we should inform the frontend.
+    if (!Array.isArray(groupData)) {
+      console.warn('No groups found or error fetching groups:', groupData);
+      // Proceed without groups if that's the case, or handle as an error if groups are strictly required.
+      // For now, let's assume it's okay to have no groups.
     }
 
-    tokenData.groups = groupData.map((group) => group.full_path);
+    // Combine all information to be sent to the frontend
+    const comprehensiveTokenData = {
+      ...tokenDataFromGitlab, // access_token, refresh_token, expires_in, etc.
+      user: userData,
+      groups: Array.isArray(groupData)
+        ? groupData.map((group) => group.full_path)
+        : [],
+    };
 
-    groupData.forEach((group) => {
-      tokens.gitlab[group.full_path] = tokenData;
-    });
-
-    const b64Token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-
+    // No server-side storage of tokens for GitLab anymore.
+    // Send all data to the frontend.
+    const b64Token = Buffer.from(
+      JSON.stringify(comprehensiveTokenData)
+    ).toString('base64');
     res.redirect(`${process.env.FRONT_URL}/gitlab/callback?token=${b64Token}`);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('OAuth Error');
+    console.error('GitLab OAuth Callback Error:', err);
+    res.status(500).send('OAuth Error with GitLab');
   }
 });
 
 router.get('/emojis', async (req, res) => {
   try {
     const groupPath = req.query.groupPath;
-    if (!groupPath) return res.status(400).send('Missing groupPath');
+    if (!groupPath) return res.status(400).send('Missing groupPath query parameter');
 
-    // use cached emojis if available
-    if (emojis.gitlab[groupPath]) {
-      return res.json(emojis.gitlab[groupPath]);
+    const accessToken = extractToken(req);
+    if (!accessToken) {
+      return res.status(401).send('Unauthorized: Missing access token');
     }
 
-    const accessToken = tokens.gitlab[groupPath]?.access_token;
-
-    if (!accessToken) {
-      return res.status(401).send('Unauthorized: No access token found');
+    // Use cached emojis if available
+    if (emojis.gitlab[groupPath]) {
+      return res.json(emojis.gitlab[groupPath]);
     }
 
     const query = `query GetCustomEmoji($groupPath: ID!) {
@@ -157,50 +174,55 @@ router.get('/emojis', async (req, res) => {
 
     const emojiData = await emojiRes.json();
 
-    if (!emojiData || !emojiData.data)
-      throw new Error(emojiData.errors || 'No data returned');
+    if (emojiRes.status === 401) {
+        return res.status(401).send('Unauthorized: Token may be invalid or expired.');
+    }
 
-    console.log(emojiData.data.group.customEmoji.nodes);
 
-    const emojisList = emojiData.data.group.customEmoji.nodes.reduce(
-      (acc, emoji) => {
-        acc[emoji.name] = emoji.url;
-        return acc;
-      },
-      {}
-    );
+    if (!emojiData || emojiData.errors || !emojiData.data?.group) {
+      console.error('Error fetching GitLab emojis from GraphQL:', emojiData?.errors || 'No data returned or group not found');
+      // Check if group is null, which can happen if token has no access to this groupPath
+      if (emojiData.data && emojiData.data.group === null) {
+        return res.status(404).send(`Group not found or no permission for groupPath: ${groupPath}`);
+      }
+      return res.status(500).send('Error fetching GitLab emojis: Invalid response from GitLab');
+    }
 
-    emojis.gitlab[groupPath] = emojisList;
+    const customEmojiNodes = emojiData.data.group.customEmoji?.nodes || [];
+    const emojisList = customEmojiNodes.reduce((acc, emoji) => {
+      acc[emoji.name] = emoji.url;
+      return acc;
+    }, {});
+
+    emojis.gitlab[groupPath] = emojisList; // Cache emojis
 
     res.json(emojisList);
   } catch (error) {
-    console.error('Error fetching GitLab emojis:', error);
-    res.status(500).send('Error fetching GitLab emojis');
+    console.error('Error in /emojis endpoint:', error);
+    res.status(500).send('Server error while fetching GitLab emojis');
   }
 });
 
 router.post('/emoji', async (req, res) => {
   try {
     const { groupPath, name, url } = req.body;
-
-    console.log(req.body);
-
     if (!groupPath || !name || !url) {
-      return res.status(400).send('Missing groupPath, name, or url');
+      return res
+        .status(400)
+        .send('Missing groupPath, name, or url in request body');
     }
 
-    const accessToken = tokens.gitlab[groupPath]?.access_token;
-
+    const accessToken = extractToken(req);
     if (!accessToken) {
-      return res.status(401).send('Unauthorized: No access token found');
+      return res.status(401).send('Unauthorized: Missing access token');
     }
 
     const mutation = `
-      mutation CreateCustomEmoji($groupPath: ID!) {
+      mutation CreateCustomEmoji($groupPath: ID!, $name: String!, $url: String!) {
         createCustomEmoji(input: {
           groupPath: $groupPath,
-          name: "${name}",
-          url: "${url}"
+          name: $name,
+          url: $url
         }) {
           clientMutationId
           customEmoji {
@@ -221,47 +243,64 @@ router.post('/emoji', async (req, res) => {
       },
       body: JSON.stringify({
         query: mutation,
-        variables: { groupPath },
+        variables: { groupPath, name, url },
       }),
     });
 
     const result = await gqlRes.json();
+
+    if (gqlRes.status === 401) {
+        return res.status(401).send('Unauthorized: Token may be invalid or expired.');
+    }
+
     const data = result.data?.createCustomEmoji;
 
-    if (result.errors || data?.errors?.length > 0) {
+    if (result.errors || (data?.errors && data.errors.length > 0)) {
+      console.error('GraphQL Error creating emoji:', result.errors || data.errors);
       return res.status(400).json({
-        error: result.errors || data.errors,
+        error: 'Failed to create emoji',
+        details: result.errors || data.errors,
       });
     }
+
+    // Clear cached emojis for the group as it has been updated
+    if (emojis.gitlab[groupPath]) {
+      delete emojis.gitlab[groupPath];
+    }
+
 
     res.json({
       success: true,
       emoji: data.customEmoji,
     });
   } catch (err) {
-    console.error('GraphQL Error:', err);
-    res.status(500).send('Server error');
+    console.error('Error in /emoji POST endpoint:', err);
+    res.status(500).send('Server error while creating emoji');
   }
 });
 
 router.delete('/emoji', async (req, res) => {
   try {
+    // For DELETE, parameters are often sent as query params or in URL, but body is also possible.
+    // Let's assume they come from req.body as per original code for consistency here.
     const { groupPath, emojiId } = req.body;
 
     if (!groupPath || !emojiId) {
-      return res.status(400).send('Missing groupPath or emojiId');
+      return res
+        .status(400)
+        .send('Missing groupPath or emojiId in request body');
     }
 
-    const accessToken = tokens.gitlab[groupPath]?.access_token;
-
+    const accessToken = extractToken(req);
     if (!accessToken) {
-      return res.status(401).send('Unauthorized: No access token found');
+      return res.status(401).send('Unauthorized: Missing access token');
     }
 
     const mutation = `
       mutation DestroyCustomEmoji($id: CustomEmojiID!) {
         destroyCustomEmoji(input: { id: $id }) {
           clientMutationId
+          errors
         }
       }
     `;
@@ -274,22 +313,23 @@ router.delete('/emoji', async (req, res) => {
       },
       body: JSON.stringify({
         query: mutation,
-        variables: { id: emojiId },
+        variables: { id: emojiId }, // Make sure emojiId is in the format "gid://gitlab/CustomEmoji/123"
       }),
     });
 
     const result = await gqlRes.json();
-    const mutationData = result.data?.destroyCustomEmoji;
 
-    if (result.errors || !mutationData) {
-      return res.status(400).json({
-        error: result.errors ?? 'Unknown error occurred',
-      });
+    if (gqlRes.status === 401) {
+        return res.status(401).send('Unauthorized: Token may be invalid or expired.');
     }
 
-    if (mutationData.errors?.length > 0) {
+    const mutationData = result.data?.destroyCustomEmoji;
+
+    if (result.errors || (mutationData?.errors && mutationData.errors.length > 0)) {
+      console.error('GraphQL Error deleting emoji:', result.errors || mutationData.errors);
       return res.status(400).json({
-        error: mutationData.errors,
+        error: 'Failed to delete emoji',
+        details: result.errors || mutationData.errors,
       });
     }
 
@@ -303,94 +343,121 @@ router.delete('/emoji', async (req, res) => {
       message: `Emoji deleted successfully`,
     });
   } catch (err) {
-    console.error('GraphQL Error:', err);
-    res.status(500).send('Server error');
+    console.error('Error in /emoji DELETE endpoint:', err);
+    res.status(500).send('Server error while deleting emoji');
   }
 });
 
-// delete errors found
-// [
-//     {
-//         "message": "The resource that you are attempting to access does not exist or you don't have permission to perform this action",
-//         "locations": [
-//             {
-//                 "line": 3,
-//                 "column": 9
-//             }
-//         ],
-//         "path": [
-//             "destroyCustomEmoji"
-//         ]
-//     }
-// ]
+router.post('/connected', async (req, res) => {
+  // Changed to POST to accept token and refresh token in body
+  const {
+    accessToken: currentAccessToken,
+    refreshToken: currentRefreshToken,
+    user, // User object from frontend localStorage
+    groups, // groups array from frontend localStorage
+    groupPath, // The specific groupPath being checked/refreshed
+  } = req.body;
 
-// create errors found
-// [
-//     "Name has already been taken"
-// ]
-
-router.get('/connected', async (req, res) => {
-  const groupPath = req.query.groupPath;
-  if (!groupPath) return res.status(400).send('Missing groupPath');
-
-  const tokenData = tokens.gitlab[groupPath];
-  if (!tokenData || !tokenData.access_token) {
-    return res.status(401).json({ error: 'Unauthorized: No access token found' });
+  if (!groupPath) {
+    return res.status(400).json({ error: 'Missing groupPath in request body' });
   }
+  if (!currentAccessToken) {
+    return res.status(400).json({ error: 'Missing accessToken in request body' });
+  }
+  // currentRefreshToken is needed if we attempt a refresh
+  // user and groups are needed to reconstruct the token data if refreshed
 
   try {
-    // Test API call to check if token is active
-    const userRes = await fetch('https://gitlab.com/api/v4/user', {
-      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    // Test API call to check if the current access token is active
+    let userRes = await fetch('https://gitlab.com/api/v4/user', {
+      headers: { Authorization: `Bearer ${currentAccessToken}` },
     });
 
-    let currentTokenData = tokenData;
+    let tokenToReturnToFrontend = {
+      access_token: currentAccessToken,
+      refresh_token: currentRefreshToken,
+      user: user, // Pass back existing user info
+      groups: groups, // Pass back existing groups info
+    };
+
     if (userRes.status === 401) {
       // Token is invalid or expired, try to refresh
+      if (!currentRefreshToken) {
+        return res.status(401).json({
+          connected: false,
+          error: 'Token expired and no refresh token provided. Please re-authenticate.',
+          needsReAuthentication: true,
+        });
+      }
       try {
-        console.log(`Token for group ${groupPath} expired, attempting refresh...`);
-        currentTokenData = await refreshToken(groupPath);
+        console.log(
+          `Token for group path hint ${groupPath} expired, attempting refresh...`
+        );
+        const refreshedTokenData = await refreshToken(currentRefreshToken, groupPath); // refreshedTokenData has new access_token, refresh_token, etc.
+
         // Retry the API call with the new token
         userRes = await fetch('https://gitlab.com/api/v4/user', {
-          headers: { Authorization: `Bearer ${currentTokenData.access_token}` },
+          headers: {
+            Authorization: `Bearer ${refreshedTokenData.access_token}`,
+          },
         });
 
         if (userRes.status === 401) {
-          // Refresh failed or new token also invalid
-          delete tokens.gitlab[groupPath]; // Clean up invalid token
-          return res.status(401).json({ connected: false, error: 'Token refresh failed or new token is also invalid. Please re-authenticate.' });
+          return res.status(401).json({
+            connected: false,
+            error: 'Token refresh failed or new token is also invalid. Please re-authenticate.',
+            needsReAuthentication: true,
+          });
         }
+        // If refresh was successful, update the token data to return
+        tokenToReturnToFrontend = {
+            ...refreshedTokenData, // new access_token, refresh_token, expires_in
+            user: user, // Preserve original user object
+            groups: groups, // Preserve original groups list
+        };
+
       } catch (refreshError) {
         console.error('Refresh token attempt failed:', refreshError.message);
-        delete tokens.gitlab[groupPath]; // Clean up if refresh fails
-        return res.status(401).json({ connected: false, error: `Token refresh failed: ${refreshError.message}. Please re-authenticate.` });
+        return res.status(401).json({
+          connected: false,
+          error: `Token refresh failed: ${refreshError.message}. Please re-authenticate.`,
+          needsReAuthentication: true,
+        });
       }
     }
 
     if (!userRes.ok) {
       // Handle other API errors not related to 401
-      throw new Error(`GitLab API error: ${userRes.statusText} (status: ${userRes.status})`);
+      // This could indicate an issue with the GitLab API itself or network problems
+      console.error(`GitLab API error after potential refresh: ${userRes.statusText} (status: ${userRes.status})`);
+      return res.status(userRes.status).json({
+          connected: false,
+          error: `GitLab API error: ${userRes.statusText}`,
+          details: await userRes.text(), // Include more details if possible
+      });
     }
 
-    const userData = await userRes.json();
-    if (!userData.id) {
-      return res.status(400).json({ connected: false, error: 'Failed to fetch user info after potential refresh' });
+    const userDataFromApi = await userRes.json();
+    if (!userDataFromApi.id) {
+      return res.status(400).json({
+        connected: false,
+        error: 'Failed to fetch user info after potential refresh, user ID missing.',
+      });
     }
 
     // If token is active or successfully refreshed, return success
+    // Also return the potentially refreshed token so frontend can update localStorage
     res.json({
       connected: true,
-      user: currentTokenData.user,
-      groups: currentTokenData.groups,
+      tokenData: tokenToReturnToFrontend, // Contains access_token, refresh_token, user, groups
     });
+
   } catch (error) {
-    console.error('Error checking GitLab connection:', error.message);
-    // Distinguish between known error types and generic server errors
-    if (error.message.includes('No refresh token available')) {
-        delete tokens.gitlab[groupPath]; // Clean up
-        return res.status(401).json({ connected: false, error: 'No refresh token available. Please re-authenticate.' });
-    }
-    res.status(500).send(`Error checking GitLab connection: ${error.message}`);
+    console.error('Error in /connected endpoint:', error.message);
+    res.status(500).json({
+        connected: false,
+        error: `Error checking GitLab connection: ${error.message}`
+    });
   }
 });
 

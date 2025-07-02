@@ -3,4 +3,4 @@ let emojis = {
   gitlab: {}, // Stocke les emojis GitLab par groupPath
 };
 
-export { emojis, tokens };
+export { emojis };

@@ -1,6 +1,5 @@
 import express from 'express';
 import { syncSlackToGitlab } from './service.js';
-import { store } from '../../store.js'; // Assuming store might be needed for tokens
 
 const router = express.Router();
 
@@ -17,7 +16,12 @@ router.post('/slack-to-gitlab', async (req, res) => {
   // Validation should happen before flushing headers, or errors reported via SSE events.
   // For simplicity, this example assumes parameters are present or handles it by closing the stream.
   if (!slackToken || !slackTeamId || !gitlabToken || !gitlabGroupPath) {
-    res.write(`data: ${JSON.stringify({type: 'error', message: 'Missing required parameters.'})}\n\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        type: 'error',
+        message: 'Missing required parameters.',
+      })}\n\n`
+    );
     res.end();
     return;
   }
@@ -42,7 +46,10 @@ router.post('/slack-to-gitlab', async (req, res) => {
     res.end();
   } catch (error) {
     console.error('Synchronization error in controller:', error);
-    sendEvent({ type: 'error', message: `Error during synchronization: ${error.message}` });
+    sendEvent({
+      type: 'error',
+      message: `Error during synchronization: ${error.message}`,
+    });
     // Ensure the response is ended even if headers were already sent
     if (!res.writableEnded) {
       res.status(500).end(); // Cannot set status if headers already sent, but useful if error before flush.

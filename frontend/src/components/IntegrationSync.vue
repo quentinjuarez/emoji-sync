@@ -4,33 +4,57 @@
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
       <div>
-        <label for="slackConnection" class="block text-sm font-medium text-gray-700">Select Slack Team</label>
+        <label
+          for="slackConnection"
+          class="block text-sm font-medium text-gray-700"
+          >Select Slack Team</label
+        >
         <select
           id="slackConnection"
           v-model="selectedSlackConnectionId"
           class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          :disabled="props.slackConnections.length === 0 || isSyncing"
+          :disabled="slackConnections.length === 0 || isSyncing"
         >
           <option :value="null" disabled>
-            {{ props.slackConnections.length === 0 ? 'No Slack connections available' : 'Select a Slack Team...' }}
+            {{
+              slackConnections.length === 0
+                ? 'No Slack connections available'
+                : 'Select a Slack Team...'
+            }}
           </option>
-          <option v-for="conn in props.slackConnections" :key="conn.id" :value="conn.id">
+          <option
+            v-for="conn in slackConnections"
+            :key="conn.name"
+            :value="conn.name"
+          >
             {{ conn.name }} ({{ conn.teamId }})
           </option>
         </select>
       </div>
       <div>
-        <label for="gitlabConnection" class="block text-sm font-medium text-gray-700">Select GitLab Group</label>
+        <label
+          for="gitlabConnection"
+          class="block text-sm font-medium text-gray-700"
+          >Select GitLab Group</label
+        >
         <select
           id="gitlabConnection"
           v-model="selectedGitlabConnectionId"
           class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
-          :disabled="props.gitlabConnections.length === 0 || isSyncing"
+          :disabled="gitlabConnections.length === 0 || isSyncing"
         >
           <option :value="null" disabled>
-            {{ props.gitlabConnections.length === 0 ? 'No GitLab connections available' : 'Select a GitLab Group...' }}
+            {{
+              gitlabConnections.length === 0
+                ? 'No GitLab connections available'
+                : 'Select a GitLab Group...'
+            }}
           </option>
-          <option v-for="conn in props.gitlabConnections" :key="conn.id" :value="conn.id">
+          <option
+            v-for="conn in gitlabConnections"
+            :key="conn.name"
+            :value="conn.name"
+          >
             {{ conn.name }} ({{ conn.groupPath }})
           </option>
         </select>
@@ -41,7 +65,11 @@
       @click="startSync"
       :disabled="isSyncing"
       class="w-full inline-flex justify-center py-2 px-4 border border-transparent shadow-sm text-sm font-medium rounded-md text-white focus:outline-none focus:ring-2 focus:ring-offset-2"
-      :class="isSyncing ? 'bg-gray-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500'"
+      :class="
+        isSyncing
+          ? 'bg-gray-400 cursor-not-allowed'
+          : 'bg-indigo-600 hover:bg-indigo-700 focus:ring-indigo-500'
+      "
     >
       {{ isSyncing ? 'Syncing...' : 'Start Slack to GitLab Emoji Sync' }}
     </button>
@@ -57,32 +85,59 @@
             :class="{
               'text-green-600': msg.type === 'success',
               'text-red-600': msg.type === 'error',
-              'text-yellow-600': msg.type === 'skipped' || msg.type === 'warning',
+              'text-yellow-600':
+                msg.type === 'skipped' || msg.type === 'warning',
               'text-blue-600': msg.type === 'info' || msg.type === 'progress',
-              'text-purple-600 font-semibold': msg.type === 'summary' || msg.type === 'done',
+              'text-purple-600 font-semibold':
+                msg.type === 'summary' || msg.type === 'done',
             }"
           >
             <span class="font-medium">[{{ msg.type.toUpperCase() }}]</span>
-            <span v-if="msg.emojiName" class="font-semibold"> {{ msg.originalName || msg.emojiName }}:</span>
+            <span v-if="msg.emojiName" class="font-semibold">
+              {{ msg.originalName || msg.emojiName }}:</span
+            >
             {{ msg.message }}
-            <span v-if="msg.type === 'skipped' && msg.newName && msg.originalName !== msg.newName"> (Sanitized to: {{ msg.newName }})</span>
+            <span
+              v-if="
+                msg.type === 'skipped' &&
+                msg.newName &&
+                msg.originalName !== msg.newName
+              "
+            >
+              (Sanitized to: {{ msg.newName }})</span
+            >
           </li>
         </ul>
       </div>
     </div>
-     <div v-if="isSyncing && overallProgress > 0" class="mt-4">
-      <label for="overallProgress" class="block text-sm font-medium text-gray-700">Overall Progress:</label>
-      <progress id="overallProgress" :value="overallProgress" max="100" class="w-full"></progress>
+    <div v-if="isSyncing && overallProgress > 0" class="mt-4">
+      <label
+        for="overallProgress"
+        class="block text-sm font-medium text-gray-700"
+        >Overall Progress:</label
+      >
+      <progress
+        id="overallProgress"
+        :value="overallProgress"
+        max="100"
+        class="w-full"
+      ></progress>
       <span>{{ overallProgress.toFixed(2) }}%</span>
     </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, PropType } from 'vue';
-
 interface SyncMessage {
-  type: 'info' | 'progress' | 'success' | 'error' | 'skipped' | 'warning' | 'summary' | 'done';
+  type:
+    | 'info'
+    | 'progress'
+    | 'success'
+    | 'error'
+    | 'skipped'
+    | 'warning'
+    | 'summary'
+    | 'done';
   message: string;
   emojiName?: string;
   originalName?: string;
@@ -90,50 +145,53 @@ interface SyncMessage {
   counts?: { success: number; skipped: number; errors: number; total?: number };
 }
 
-interface SlackConnection {
-  id: string; // Could be teamId or a unique ID for the connection
-  name: string; // User-friendly name, e.g., Slack Team Name
-  token: string;
-  teamId: string;
+interface Integration {
+  type: string;
+  status: string;
+  name?: string; // e.g., Slack team name or GitLab group path
+  teamId?: string; // For Slack
+  groupPath?: string; // For GitLab - this will be the specific group path
+  key: string; // Unique key for Vue list rendering, e.g., "gitlab-group/path"
+  accessToken?: string; // Optional, if you want to store the token in the integration object
 }
 
-interface GitLabConnection {
-  id: string; // Could be groupPath or a unique ID
-  name: string; // User-friendly name, e.g., GitLab Group Name
-  token: string;
-  groupPath: string;
-}
-
-const props = defineProps({
-  slackConnections: {
-    type: Array as PropType<SlackConnection[]>,
-    default: () => []
-  },
-  gitlabConnections: {
-    type: Array as PropType<GitLabConnection[]>,
-    default: () => []
-  }
-});
+const props = defineProps<{
+  integrations: Integration[];
+}>();
 
 const selectedSlackConnectionId = ref<string | null>(null);
 const selectedGitlabConnectionId = ref<string | null>(null);
 
 const isSyncing = ref(false);
 const syncMessages = ref<SyncMessage[]>([]);
-// eventSource ref is not used with fetch streaming, can be removed if not planning to switch
-// const eventSource = ref<EventSource | null>(null);
+const eventSource = ref<EventSource | null>(null);
 const overallProgress = ref(0);
 let totalEmojisToProcess = 0;
 let processedEmojis = 0;
 
+const slackConnections = computed(() =>
+  props.integrations.filter((i) => i.type === 'slack')
+);
+const gitlabConnections = computed(() =>
+  props.integrations.filter((i) => i.type === 'gitlab')
+);
+
 const selectedSlackConnection = computed(() => {
   if (!selectedSlackConnectionId.value) return null;
-  return props.slackConnections.find(sc => sc.id === selectedSlackConnectionId.value) || null;
+  return (
+    slackConnections.value.find(
+      (sc) => sc.name === selectedSlackConnectionId.value
+    ) || null
+  );
 });
 
 const selectedGitlabConnection = computed(() => {
   if (!selectedGitlabConnectionId.value) return null;
-  return props.gitlabConnections.find(gc => gc.id === selectedGitlabConnectionId.value) || null;
+  return (
+    gitlabConnections.value.find(
+      (gc) => gc.name === selectedGitlabConnectionId.value
+    ) || null
+  );
 });
 
 const startSync = async () => {
@@ -141,7 +199,10 @@ const startSync = async () => {
 
   // Validation
   if (!selectedSlackConnection.value || !selectedGitlabConnection.value) {
-    syncMessages.value.push({ type: 'error', message: 'Please select a Slack team and a GitLab group.' });
+    syncMessages.value.push({
+      type: 'error',
+      message: 'Please select a Slack team and a GitLab group.',
+    });
     return;
   }
 
@@ -151,7 +212,8 @@ const startSync = async () => {
   totalEmojisToProcess = 0;
   processedEmojis = 0;
 
-  const backendUrl = import.meta.env.VITE_BACKEND_URL || 'http://localhost:3101';
+  const backendUrl =
+    import.meta.env.VITE_BACKEND_URL || 'http://localhost:3101';
 
   eventSource.value = new EventSource(`${backendUrl}/sync/slack-to-gitlab`, {
     // EventSource constructor itself doesn't support sending a body.
@@ -200,7 +262,10 @@ const startSync = async () => {
 
   // This check is already at the beginning of startSync, but good for type safety here
   if (!currentSlackConn || !currentGitlabConn) {
-    syncMessages.value.push({ type: 'error', message: 'Internal error: Connection details not found after selection.' });
+    syncMessages.value.push({
+      type: 'error',
+      message: 'Internal error: Connection details not found after selection.',
+    });
     isSyncing.value = false;
     return;
   }
@@ -214,26 +279,33 @@ const startSync = async () => {
         // 'Accept': 'text/event-stream' // Server should set Content-Type
       },
       body: JSON.stringify({
-        slackToken: currentSlackConn.token,
+        slackToken: currentSlackConn.accessToken, // Assuming accessToken is stored in the integration
         slackTeamId: currentSlackConn.teamId,
-        gitlabToken: currentGitlabConn.token,
+        gitlabToken: currentGitlabConn.accessToken, // Assuming accessToken is stored in the integration
         gitlabGroupPath: currentGitlabConn.groupPath,
       }),
     });
 
     if (!response.ok || !response.body) {
       const errorText = await response.text();
-      throw new Error(`Failed to start sync: ${response.status} ${response.statusText}. ${errorText}`);
+      throw new Error(
+        `Failed to start sync: ${response.status} ${response.statusText}. ${errorText}`
+      );
     }
 
-    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    const reader = response.body
+      .pipeThrough(new TextDecoderStream())
+      .getReader();
 
     // Manually process the stream
     // eslint-disable-next-line no-constant-condition
     while (true) {
       const { value, done } = await reader.read();
       if (done) {
-        syncMessages.value.push({ type: 'info', message: 'Stream finished by server.' });
+        syncMessages.value.push({
+          type: 'info',
+          message: 'Stream finished by server.',
+        });
         break;
       }
       // SSE messages are 'data: {...}\n\n'. Multiple messages can arrive in one chunk.
@@ -246,18 +318,23 @@ const startSync = async () => {
               const msg = JSON.parse(jsonData) as SyncMessage;
               syncMessages.value.push(msg);
 
-              if (msg.type === 'info' && msg.message.includes('Found') && msg.message.includes('emojis in Slack')) {
-                  const match = msg.message.match(/Found (\d+) emojis in Slack/);
-                  if (match && match[1]) {
-                      totalEmojisToProcess = parseInt(match[1], 10);
-                  }
+              if (
+                msg.type === 'info' &&
+                msg.message.includes('Found') &&
+                msg.message.includes('emojis in Slack')
+              ) {
+                const match = msg.message.match(/Found (\d+) emojis in Slack/);
+                if (match && match[1]) {
+                  totalEmojisToProcess = parseInt(match[1], 10);
+                }
               }
 
               if (['success', 'skipped', 'error'].includes(msg.type)) {
-                  processedEmojis++;
-                  if (totalEmojisToProcess > 0) {
-                      overallProgress.value = (processedEmojis / totalEmojisToProcess) * 100;
-                  }
+                processedEmojis++;
+                if (totalEmojisToProcess > 0) {
+                  overallProgress.value =
+                    (processedEmojis / totalEmojisToProcess) * 100;
+                }
               }
 
               if (msg.type === 'done' || msg.type === 'summary') {
@@ -266,28 +343,37 @@ const startSync = async () => {
                 // No need to close EventSource as we are using fetch
                 break;
               }
-              if (msg.type === 'error' && msg.message.includes('Missing required parameters')) {
-                 isSyncing.value = false;
-                 break;
+              if (
+                msg.type === 'error' &&
+                msg.message.includes('Missing required parameters')
+              ) {
+                isSyncing.value = false;
+                break;
               }
             } catch (e) {
               console.error('Failed to parse SSE message:', jsonData, e);
-              syncMessages.value.push({ type: 'error', message: `Malformed event: ${jsonData}` });
+              syncMessages.value.push({
+                type: 'error',
+                message: `Malformed event: ${jsonData}`,
+              });
             }
           }
         }
       }
     }
-
   } catch (error) {
     console.error('Sync error:', error);
-    syncMessages.value.push({ type: 'error', message: (error as Error).message || 'Unknown error during sync.' });
+    syncMessages.value.push({
+      type: 'error',
+      message: (error as Error).message || 'Unknown error during sync.',
+    });
     isSyncing.value = false;
   } finally {
     // This block will run if the loop breaks or an error occurs
-    if (isSyncing.value) { // If still syncing, means it was an unexpected break
-        isSyncing.value = false;
-        syncMessages.value.push({ type: 'info', message: 'Sync process ended.' });
+    if (isSyncing.value) {
+      // If still syncing, means it was an unexpected break
+      isSyncing.value = false;
+      syncMessages.value.push({ type: 'info', message: 'Sync process ended.' });
     }
     // No EventSource to close if using fetch for streaming
   }

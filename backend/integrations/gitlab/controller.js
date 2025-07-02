@@ -40,7 +40,7 @@ router.get('/callback', async (req, res) => {
 });
 
 // Endpoint to delete all custom emojis for a group
-router.delete('/emojis/delete-all', async (req, res) => {
+router.delete('/emojis/all', async (req, res) => {
   try {
     const { groupPath } = req.body;
     if (!groupPath) {
@@ -52,10 +52,13 @@ router.delete('/emojis/delete-all', async (req, res) => {
       return res.status(401).send('Unauthorized: Missing access token');
     }
 
-    const result = await GitLabService.deleteAllEmojisForGroup(accessToken, groupPath);
+    const result = await GitLabService.deleteAllEmojisForGroup(
+      accessToken,
+      groupPath
+    );
     res.json(result);
   } catch (err) {
-    console.error('Error in /emojis/delete-all DELETE endpoint:', err.message);
+    console.error('Error in /emojis/all DELETE endpoint:', err.message);
     const status = err.status || 500;
     const responseJson = {
       error: err.message || 'Server error while deleting all emojis',

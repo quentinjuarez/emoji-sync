@@ -2,7 +2,7 @@ import dotenv from 'dotenv';
 import express from 'express';
 import cors from 'cors';
 
-import gitlabRouter from './integrations/gitlab.js';
+import gitlabRouter from './integrations/gitlab/controller.js';
 import slackRouter from './integrations/slack.js';
 import { emojis, tokens } from './store.js';
 

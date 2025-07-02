@@ -25,7 +25,7 @@
       v-if="integrations.length"
       :value="integrations"
       class="mb-6"
-      dataKey="type"
+      dataKey="key"
     >
       <Column field="type" header="Type">
         <template #body="slotProps">
@@ -68,6 +68,16 @@
           />
         </template>
       </Column>
+      <Column header="Supprimer" style="width: 3rem; text-align: center">
+        <template #body="slotProps">
+          <Button
+            icon="pi pi-trash"
+            class="p-button-danger"
+            size="small"
+            @click="deleteIntegration(slotProps.data)"
+          />
+        </template>
+      </Column>
     </DataTable>
 
     <div
@@ -85,7 +95,7 @@
     >
       <div class="grid grid-cols-6 gap-3 max-h-[400px] overflow-auto">
         <div
-          v-for="(url, name) in displayedEmojis"
+          v-for="{ url, name } in displayedEmojis"
           :key="name"
           class="text-center border p-2 rounded"
         >
@@ -101,19 +111,29 @@
 interface Integration {
   type: string;
   status: string;
-  name?: string;
-  teamId?: string;
-  groupPath?: string;
+  name?: string; // e.g., Slack team name or GitLab group name/path
+  teamId?: string; // For Slack
+  groupPath?: string; // For GitLab - this will be the specific group path
+  // Add a unique key for DataTable if type + groupPath/teamId isn't sufficiently unique
+  // For instance, if a user could add the same GitLab group twice (though current logic prevents this)
+  key?: string;
 }
 const props = defineProps<{
   integrations: Integration[];
 }>();
 
-const emit = defineEmits(['refresh-integrations']);
+// const emit = defineEmits(['refresh-integrations']); // Not currently used, but good for future
+
+type Emoji = {
+  id: string;
+  url: string;
+  name: string;
+};
 
 const selectedIntegration = ref();
-const displayedEmojis = ref<Record<string, string>>({});
+const displayedEmojis = ref<Emoji[]>([]);
 const emojiDialogVisible = ref(false);
+const isLoadingEmojis = ref(false); // To show loading state in the dialog
 
 const integrationOptions = [
   { label: 'Slack', value: 'slack' },
@@ -132,49 +152,132 @@ const gitlabOAuthUrl = `https://gitlab.com/oauth/authorize?client_id=${
 
 function onAddIntegration() {
   if (selectedIntegration.value === 'slack') {
+    localStorage.removeItem('slackData'); // Clear old data before new auth
     window.location.href = slackOAuthUrl;
   } else if (selectedIntegration.value === 'gitlab') {
+    localStorage.removeItem('gitlabData'); // Clear old data before new auth
     window.location.href = gitlabOAuthUrl;
   }
 }
 
+// Generic function to get token from localStorage
+function getGitLabTokenData() {
+  const gitlabDataString = localStorage.getItem('gitlabData');
+  if (!gitlabDataString) return null;
+  try {
+    return JSON.parse(gitlabDataString);
+  } catch (e) {
+    console.error('Error parsing gitlabData:', e);
+    localStorage.removeItem('gitlabData'); // Clear corrupted data
+    return null;
+  }
+}
+
+// Helper function to get Slack token data from localStorage
+function getSlackTokenData() {
+  const slackDataString = localStorage.getItem('slackData');
+  if (!slackDataString) return null;
+  try {
+    const parsed = JSON.parse(slackDataString);
+    // Basic validation: check for 'ok' and 'access_token'
+    if (parsed && parsed.ok && parsed.access_token) {
+      return parsed;
+    }
+    console.warn(
+      'Stored slackData is invalid or missing access_token.',
+      parsed
+    );
+    localStorage.removeItem('slackData'); // Clear corrupted/invalid data
+    return null;
+  } catch (e) {
+    console.error('Error parsing slackData:', e);
+    localStorage.removeItem('slackData'); // Clear corrupted data
+    return null;
+  }
+}
+
 async function fetchSlackEmojis(teamId: string) {
+  const tokenData = getSlackTokenData();
+  if (!tokenData || !tokenData.access_token) {
+    throw new Error('Slack token not found or invalid in localStorage.');
+  }
+
   const res = await fetch(
-    `${import.meta.env.VITE_BACK_URL}/slack/emojis?teamId=${teamId}`
+    `${import.meta.env.VITE_BACK_URL}/slack/emojis?teamId=${encodeURIComponent(
+      teamId
+    )}`,
+    {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+      },
+    }
   );
+  if (!res.ok) {
+    if (res.status === 401) {
+      throw new Error(
+        'Unauthorized to fetch Slack emojis. Token might be expired or invalid.'
+      );
+    }
+    const errorData = await res.text();
+    throw new Error(
+      `Failed to fetch Slack emojis for team ${teamId}: ${res.status} ${errorData}`
+    );
+  }
   return await res.json();
 }
 
 async function fetchGitlabEmojis(groupPath: string) {
+  const tokenData = getGitLabTokenData();
+  if (!tokenData || !tokenData.access_token) {
+    throw new Error('GitLab token not found in localStorage.');
+  }
+
   const res = await fetch(
-    `${import.meta.env.VITE_BACK_URL}/gitlab/emojis?groupPath=${groupPath}`
+    `${
+      import.meta.env.VITE_BACK_URL
+    }/gitlab/emojis?groupPath=${encodeURIComponent(groupPath)}`,
+    {
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+      },
+    }
   );
+  if (!res.ok) {
+    if (res.status === 401) {
+      // Specific handling for 401 may involve triggering re-authentication
+      // For now, just throw an error that can be caught by the caller
+      throw new Error(
+        'Unauthorized to fetch GitLab emojis. Token might be expired.'
+      );
+    }
+    const errorData = await res.text();
+    throw new Error(
+      `Failed to fetch GitLab emojis for ${groupPath}: ${res.status} ${errorData}`
+    );
+  }
   return await res.json();
 }
 
-function viewEmojis(integration: { type: string }) {
-  if (integration.type === 'slack') {
-    const slackData = localStorage.getItem('slackData');
-    if (slackData) {
-      const { team } = JSON.parse(slackData);
-      if (team?.id) {
-        fetchSlackEmojis(team.id).then((emojis) => {
-          displayedEmojis.value = emojis;
-          emojiDialogVisible.value = true;
-        });
-      }
+async function viewEmojis(integration: Integration) {
+  displayedEmojis.value = [];
+  emojiDialogVisible.value = true;
+  isLoadingEmojis.value = true;
+
+  try {
+    if (integration.type === 'slack' && integration.teamId) {
+      displayedEmojis.value = await fetchSlackEmojis(integration.teamId);
+    } else if (integration.type === 'gitlab' && integration.groupPath) {
+      displayedEmojis.value = await fetchGitlabEmojis(integration.groupPath);
+    } else {
+      throw new Error(
+        'Integration type or required ID (teamId/groupPath) is missing.'
+      );
     }
-  } else if (integration.type === 'gitlab') {
-    const gitlabData = localStorage.getItem('gitlabData');
-    if (gitlabData) {
-      const { groups } = JSON.parse(gitlabData);
-      if (groups?.length) {
-        fetchGitlabEmojis(groups[0]).then((emojis) => {
-          displayedEmojis.value = emojis;
-          emojiDialogVisible.value = true;
-        });
-      }
-    }
+  } catch (error) {
+    console.error('Error fetching emojis:', error);
+    displayedEmojis.value = [];
+  } finally {
+    isLoadingEmojis.value = false;
   }
 }
 
@@ -203,6 +306,12 @@ const reconnectIntegration = (integration: Integration) => {
   }
   // After redirecting for OAuth, the onMounted hook in index.vue should re-check statuses.
 };
+
+const emit = defineEmits(['delete-integration']);
+
+function deleteIntegration(integration: Integration) {
+  emit('delete-integration', integration);
+}
 </script>
 
 <style scoped>

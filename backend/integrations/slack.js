@@ -1,9 +1,18 @@
 import express from 'express';
 import fetch from 'node-fetch';
 
-import { emojis, tokens } from '../store.js';
+import { emojis } from '../store.js'; // `tokens` removed from import
 
 const router = express.Router();
+
+// Helper function to extract token from Authorization header
+const extractToken = (req) => {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    return authHeader.substring(7); // Remove 'Bearer ' prefix
+  }
+  return null;
+};
 
 router.get('/callback', async (req, res) => {
   const code = req.query.code;
@@ -21,107 +30,152 @@ router.get('/callback', async (req, res) => {
       }),
     });
 
-    const tokenData = await tokenRes.json();
-    if (!tokenData.ok)
-      return res.status(400).send('OAuth error: ' + tokenData.error);
+    const tokenDataFromSlack = await tokenRes.json(); // This is the direct response from Slack
+    if (!tokenDataFromSlack.ok) {
+      console.error('Slack OAuth error:', tokenDataFromSlack.error);
+      return res.status(400).send('OAuth error: ' + tokenDataFromSlack.error);
+    }
 
-    tokens.slack[tokenData.team.id] = tokenData;
+    // Do not store tokenDataFromSlack in server-side `tokens.slack` anymore.
+    // Send it directly to the frontend.
+    // tokenDataFromSlack typically includes:
+    // {
+    //   ok: true,
+    //   app_id: 'A0xxxxxxx',
+    //   authed_user: { id: 'U0xxxxxxx', scope: '...', access_token: 'xoxp-...', token_type: 'user' },
+    //   scope: 'channels:read,chat:write,...',
+    //   token_type: 'bot',
+    //   access_token: 'xoxb-xxxxxxxxx', // This is usually the bot token we need
+    //   bot_user_id: 'B0xxxxxxx',
+    //   team: { id: 'T0xxxxxxx', name: 'Team Name' },
+    //   enterprise: null,
+    //   is_enterprise_install: false
+    // }
+    // We need to ensure the frontend receives all necessary parts, especially access_token and team info.
 
-    const b64Token = Buffer.from(JSON.stringify(tokenData)).toString('base64');
-
+    const b64Token = Buffer.from(JSON.stringify(tokenDataFromSlack)).toString(
+      'base64'
+    );
     res.redirect(`${process.env.FRONT_URL}/slack/callback?token=${b64Token}`);
   } catch (err) {
-    console.error(err);
-    res.status(500).send('Server error');
+    console.error('Error in Slack OAuth callback:', err);
+    res.status(500).send('Server error during Slack OAuth callback');
   }
 });
 
-router.get('/connected', async (req, res) => {
-  const teamId = req.query.teamId;
-  if (!teamId) {
-    // Try to infer teamId if only one token exists (e.g., during initial setup or if UI doesn't have teamId yet)
-    const storedTeamIds = Object.keys(tokens.slack);
-    if (storedTeamIds.length === 1) {
-      // teamId = storedTeamIds[0]; // This is a potential auto-detection, but explicit teamId is better.
-      // For now, require teamId to be explicit.
-      return res.status(400).json({ connected: false, error: 'Missing teamId query parameter.' });
-    } else if (storedTeamIds.length === 0) {
-      return res.status(404).json({ connected: false, error: 'No Slack integration found.' });
-    } else {
-      // If multiple integrations, teamId is necessary to know which one to check
-      return res.status(400).json({ connected: false, error: 'Missing teamId and multiple Slack integrations exist.' });
-    }
-  }
+// Changed to POST to accept token in header/body if preferred,
+// but for Slack, `auth.test` uses the token in header, teamId might not be needed if token is self-descriptive.
+// However, `teamId` can be useful for cache keying on backend if we keep emoji cache.
+router.post('/connected', async (req, res) => {
+  const accessToken = extractToken(req);
+  const { teamId } = req.body; // Frontend should send teamId for context if available
 
-  const tokenData = tokens.slack[teamId];
-  if (!tokenData || !tokenData.access_token) {
-    return res.status(401).json({ connected: false, error: 'Unauthorized: No access token found for this teamId.' });
+  if (!accessToken) {
+    return res
+      .status(401)
+      .json({ connected: false, error: 'Unauthorized: Missing access token.' });
   }
 
   try {
     const authTestRes = await fetch('https://slack.com/api/auth.test', {
-      method: 'POST', // Using POST as recommended by Slack docs for auth.test
+      method: 'POST',
       headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-        'Content-Type': 'application/json', // Though no body is sent, it's good practice
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
       },
     });
 
     const authTestData = await authTestRes.json();
 
     if (!authTestData.ok) {
-      // Token is invalid
-      console.warn(`Slack auth.test failed for team ${teamId}: ${authTestData.error}`);
-      // Clean up the invalid token from the store
-      delete tokens.slack[teamId];
-      delete emojis.slack[teamId]; // Also clear any cached emojis for this team
-      return res.status(401).json({ connected: false, error: `Token validation failed: ${authTestData.error}. Please re-authenticate.` });
+      console.warn(
+        `Slack auth.test failed for token (team hint: ${teamId || 'N/A'}): ${
+          authTestData.error
+        }`
+      );
+      // No server-side token store to clean, frontend will handle localStorage removal.
+      return res.status(401).json({
+        connected: false,
+        error: `Token validation failed: ${authTestData.error}. Please re-authenticate.`,
+        needsReAuthentication: true, // Signal to frontend
+      });
     }
 
     // Token is active
     res.json({
       connected: true,
-      team: authTestData.team,
-      user: authTestData.user,
+      // Send back the validated identity info from auth.test
+      // This can be used by frontend to update/confirm its stored team name, user name etc.
+      team: authTestData.team, // { id, name }
+      user: authTestData.user, // { name, id }
       team_id: authTestData.team_id,
       user_id: authTestData.user_id,
+      bot_id: authTestData.bot_id, // if applicable
     });
   } catch (error) {
-    console.error(`Error checking Slack connection for team ${teamId}:`, error);
-    res.status(500).json({ connected: false, error: 'Server error while checking Slack connection.' });
+    console.error(
+      `Error checking Slack connection (team hint: ${teamId || 'N/A'}):`,
+      error
+    );
+    res.status(500).json({
+      connected: false,
+      error: 'Server error while checking Slack connection.',
+    });
   }
 });
 
 router.get('/emojis', async (req, res) => {
+  const accessToken = extractToken(req);
+  const teamId = req.query.teamId; // teamId can be used as a cache key for emojis
+
+  if (!accessToken) {
+    return res.status(401).send('Unauthorized: Missing access token');
+  }
+  if (!teamId) {
+    // While token is provided, teamId helps with caching.
+    // If not critical and emoji list isn't team-specific from token perspective (it is), this might be optional.
+    // However, Slack's emoji.list is workspace-specific, so context (teamId) is good.
+    return res
+      .status(400)
+      .send('Missing teamId query parameter for caching context');
+  }
+
+  // Use cached emojis if available (cache key is teamId)
+  if (emojis.slack[teamId]) {
+    return res.json(emojis.slack[teamId]);
+  }
+
   try {
-    const teamId = req.query.teamId;
-    if (!teamId) return res.status(400).send('Missing teamId');
-
-    // use cached emojis if available
-    if (emojis.slack[teamId]) {
-      return res.json(emojis.slack[teamId]);
-    }
-
-    const accessToken = tokens.slack[teamId]?.access_token;
-
-    if (!accessToken) {
-      return res.status(401).send('Unauthorized: No access token found');
-    }
-
     const emojiRes = await fetch('https://slack.com/api/emoji.list', {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
 
     const emojiData = await emojiRes.json();
 
-    if (!emojiData.ok)
+    if (!emojiData.ok) {
+      console.error(
+        `Slack emoji.list error for team ${teamId}: ${emojiData.error}`
+      );
       return res.status(500).send('Emoji error: ' + emojiData.error);
+    }
 
-    emojis.slack[teamId] = emojiData.emoji;
+    const emojiList = Object.keys(emojiData.emoji).reduce((acc, emojiName) => {
+      if (emojiData.emoji[emojiName].startsWith('alias:')) return acc;
 
-    res.json(emojiData.emoji);
+      acc.push({
+        id: emojiName,
+        name: emojiName,
+        url: emojiData.emoji[emojiName],
+      });
+      return acc;
+    }, []);
+
+    // Cache emojis using teamId
+    emojis.slack[teamId] = emojiList;
+
+    res.json(emojiList);
   } catch (error) {
-    console.error('Error fetching Slack emojis:', error);
+    console.error(`Error fetching Slack emojis for team ${teamId}:`, error);
     res.status(500).send('Error fetching Slack emojis');
   }
 });

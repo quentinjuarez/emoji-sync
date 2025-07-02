@@ -22,10 +22,10 @@
     </div>
 
     <DataTable
-      v-if="integrations.length"
-      :value="integrations"
+      v-if="props.integrations.length"
+      :value="props.integrations"
       class="mb-6"
-      dataKey="key"
+      dataKey="id"
     >
       <Column field="type" header="Type">
         <template #body="slotProps">
@@ -93,7 +93,24 @@
       header="Emojis"
       :style="{ width: '50vw' }"
     >
-      <div class="grid grid-cols-6 gap-3 max-h-[400px] overflow-auto">
+      <Message
+        v-if="deleteAllSuccessMessage"
+        severity="success"
+        :closable="false"
+        >{{ deleteAllSuccessMessage }}</Message
+      >
+      <Message v-if="deleteAllError" severity="error" :closable="false">{{
+        deleteAllError
+      }}</Message>
+
+      <div v-if="isLoadingEmojis" class="text-center p-4">
+        <ProgressSpinner style="width: 50px; height: 50px" strokeWidth="8" />
+        <p>Chargement des emojis...</p>
+      </div>
+      <div
+        v-else-if="displayedEmojis.length > 0"
+        class="grid grid-cols-6 gap-3 max-h-[400px] overflow-auto mt-4"
+      >
         <div
           v-for="{ url, name } in displayedEmojis"
           :key="name"
@@ -103,30 +120,39 @@
           <div class="text-xs mt-1 truncate">{{ name }}</div>
         </div>
       </div>
+      <div
+        v-else-if="
+          !isLoadingEmojis &&
+          displayedEmojis.length === 0 &&
+          !deleteAllSuccessMessage
+        "
+        class="text-center text-gray-500 py-4"
+      >
+        Aucun emoji personnalisé trouvé pour cette intégration.
+      </div>
+
+      <template #footer>
+        <Button
+          v-if="
+            currentIntegration?.type === 'gitlab' &&
+            displayedEmojis.length > 0 &&
+            !deleteAllSuccessMessage
+          "
+          label="Supprimer tous les Emojis GitLab"
+          icon="pi pi-trash"
+          class="p-button-danger"
+          @click="deleteAllGitLabEmojis"
+          :loading="isDeletingAllEmojis"
+        />
+      </template>
     </Dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-interface Integration {
-  type: string;
-  status: string;
-  name?: string;
-  teamId?: string;
-  groupPath?: string;
-  key?: string;
-}
 const props = defineProps<{
   integrations: Integration[];
 }>();
-
-// const emit = defineEmits(['refresh-integrations']); // Not currently used, but good for future
-
-type Emoji = {
-  id: string;
-  url: string;
-  name: string;
-};
 
 const selectedIntegration = ref();
 const displayedEmojis = ref<Emoji[]>([]);
@@ -242,8 +268,6 @@ async function fetchGitlabEmojis(groupPath: string) {
   );
   if (!res.ok) {
     if (res.status === 401) {
-      // Specific handling for 401 may involve triggering re-authentication
-      // For now, just throw an error that can be caught by the caller
       throw new Error(
         'Unauthorized to fetch GitLab emojis. Token might be expired.'
       );
@@ -258,14 +282,17 @@ async function fetchGitlabEmojis(groupPath: string) {
 
 async function viewEmojis(integration: Integration) {
   displayedEmojis.value = [];
+  currentIntegration.value = integration; // Store the integration
   emojiDialogVisible.value = true;
   isLoadingEmojis.value = true;
+  deleteAllError.value = ''; // Clear previous errors
+  deleteAllSuccessMessage.value = '';
 
   try {
-    if (integration.type === 'slack' && integration.teamId) {
-      displayedEmojis.value = await fetchSlackEmojis(integration.teamId);
-    } else if (integration.type === 'gitlab' && integration.groupPath) {
-      displayedEmojis.value = await fetchGitlabEmojis(integration.groupPath);
+    if (integration.type === 'slack' && integration.id) {
+      displayedEmojis.value = await fetchSlackEmojis(integration.id);
+    } else if (integration.type === 'gitlab' && integration.id) {
+      displayedEmojis.value = await fetchGitlabEmojis(integration.id);
     } else {
       throw new Error(
         'Integration type or required ID (teamId/groupPath) is missing.'
@@ -274,8 +301,70 @@ async function viewEmojis(integration: Integration) {
   } catch (error) {
     console.error('Error fetching emojis:', error);
     displayedEmojis.value = [];
+    // Optionally, display this error in the dialog
   } finally {
     isLoadingEmojis.value = false;
+  }
+}
+
+const currentIntegration = ref<Integration | null>(null); // To store the integration for which emojis are being viewed/deleted
+const isDeletingAllEmojis = ref(false);
+const deleteAllError = ref('');
+const deleteAllSuccessMessage = ref('');
+
+async function deleteAllGitLabEmojis() {
+  if (
+    !currentIntegration.value ||
+    currentIntegration.value.type !== 'gitlab' ||
+    !currentIntegration.value.id
+  ) {
+    deleteAllError.value =
+      'Cannot delete emojis: No GitLab integration selected or groupPath is missing.';
+    return;
+  }
+
+  isDeletingAllEmojis.value = true;
+  deleteAllError.value = '';
+  deleteAllSuccessMessage.value = '';
+
+  const tokenData = getGitLabTokenData();
+  if (!tokenData || !tokenData.access_token) {
+    deleteAllError.value =
+      'GitLab token not found in localStorage. Please reconnect.';
+    isDeletingAllEmojis.value = false;
+    return;
+  }
+
+  try {
+    const res = await fetch(
+      `${import.meta.env.VITE_BACK_URL}/gitlab/emojis/all`,
+      {
+        method: 'DELETE',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenData.access_token}`,
+        },
+        body: JSON.stringify({ groupPath: currentIntegration.value.id }),
+      }
+    );
+
+    const result = await res.json();
+
+    if (!res.ok) {
+      throw new Error(
+        result.error || `Failed to delete all emojis: ${res.statusText}`
+      );
+    }
+
+    deleteAllSuccessMessage.value =
+      result.message || 'All emojis deleted successfully.';
+    displayedEmojis.value = [];
+  } catch (error: any) {
+    console.error('Error deleting all GitLab emojis:', error);
+    deleteAllError.value =
+      error.message || 'An unknown error occurred while deleting emojis.';
+  } finally {
+    isDeletingAllEmojis.value = false;
   }
 }
 
@@ -294,15 +383,12 @@ function getSeverity(integration: Integration) {
 
 const reconnectIntegration = (integration: Integration) => {
   if (integration.type === 'slack') {
-    // Clear potentially stale data before redirecting
     localStorage.removeItem('slackData');
     window.location.href = slackOAuthUrl;
   } else if (integration.type === 'gitlab') {
-    // Clear potentially stale data before redirecting
     localStorage.removeItem('gitlabData');
     window.location.href = gitlabOAuthUrl;
   }
-  // After redirecting for OAuth, the onMounted hook in index.vue should re-check statuses.
 };
 
 const emit = defineEmits(['delete-integration']);
@@ -311,7 +397,3 @@ function deleteIntegration(integration: Integration) {
   emit('delete-integration', integration);
 }
 </script>
-
-<style scoped>
-/* Optionnel : ajuste la hauteur max du tableau si besoin */
-</style>

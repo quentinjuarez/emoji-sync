@@ -29,13 +29,24 @@
     >
       <Column field="type" header="Type">
         <template #body="slotProps">
-          <span class="font-semibold">{{ slotProps.data.type === 'gitlab' ? 'GitLab' : slotProps.data.type === 'slack' ? 'Slack' : slotProps.data.type }}</span>
-          <div v-if="slotProps.data.name" class="text-xs text-gray-500">{{ slotProps.data.name }}</div>
+          <span class="font-semibold">{{
+            slotProps.data.type === 'gitlab'
+              ? 'GitLab'
+              : slotProps.data.type === 'slack'
+              ? 'Slack'
+              : slotProps.data.type
+          }}</span>
+          <div v-if="slotProps.data.name" class="text-xs text-gray-500">
+            {{ slotProps.data.name }}
+          </div>
         </template>
       </Column>
       <Column field="status" header="Statut">
         <template #body="slotProps">
-          <Tag :value="slotProps.data.status" :severity="getSeverity(slotProps.data)" />
+          <Tag
+            :value="slotProps.data.status"
+            :severity="getSeverity(slotProps.data)"
+          />
         </template>
       </Column>
       <Column header="Actions" style="min-width: 12rem">
@@ -59,7 +70,10 @@
       </Column>
     </DataTable>
 
-    <div v-if="!integrations || integrations.length === 0" class="text-center text-gray-500">
+    <div
+      v-if="!integrations || integrations.length === 0"
+      class="text-center text-gray-500"
+    >
       Aucune intégration pour le moment. Cliquez sur "Ajouter une intégration".
     </div>
 
@@ -168,7 +182,10 @@ function getSeverity(integration: Integration) {
   if (integration.status === 'Connecté') {
     return 'success';
   }
-  if (integration.status?.startsWith('Déconnecté') || integration.status?.startsWith('Erreur')) {
+  if (
+    integration.status?.startsWith('Déconnecté') ||
+    integration.status?.startsWith('Erreur')
+  ) {
     return 'danger';
   }
   return 'info';
@@ -186,18 +203,6 @@ const reconnectIntegration = (integration: Integration) => {
   }
   // After redirecting for OAuth, the onMounted hook in index.vue should re-check statuses.
 };
-
-// This function is kept for adding NEW integrations.
-// Reconnection for existing ones is handled by reconnectIntegration.
-function onAddIntegration() {
-  if (selectedIntegration.value === 'slack') {
-    localStorage.removeItem('slackData'); // Clear before adding new
-    window.location.href = slackOAuthUrl;
-  } else if (selectedIntegration.value === 'gitlab') {
-    localStorage.removeItem('gitlabData'); // Clear before adding new
-    window.location.href = gitlabOAuthUrl;
-  }
-}
 </script>
 
 <style scoped>

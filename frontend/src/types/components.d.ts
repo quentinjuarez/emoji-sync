@@ -18,5 +18,6 @@ declare module 'vue' {
     RouterView: typeof import('vue-router')['RouterView']
     Sync: typeof import('./../components/Sync.vue')['default']
     SyncPoc: typeof import('./../components/SyncPoc.vue')['default']
+    Tag: typeof import('primevue/tag')['default']
   }
 }

@@ -27,7 +27,7 @@
             :key="conn.name"
             :value="conn.name"
           >
-            {{ conn.name }} ({{ conn.teamId }})
+            {{ conn.name }} ({{ conn.id }})
           </option>
         </select>
       </div>
@@ -55,7 +55,7 @@
             :key="conn.name"
             :value="conn.name"
           >
-            {{ conn.name }} ({{ conn.groupPath }})
+            {{ conn.name }} ({{ conn.id }})
           </option>
         </select>
       </div>
@@ -145,16 +145,6 @@ interface SyncMessage {
   counts?: { success: number; skipped: number; errors: number; total?: number };
 }
 
-interface Integration {
-  type: string;
-  status: string;
-  name?: string; // e.g., Slack team name or GitLab group path
-  teamId?: string; // For Slack
-  groupPath?: string; // For GitLab - this will be the specific group path
-  key: string; // Unique key for Vue list rendering, e.g., "gitlab-group/path"
-  accessToken?: string; // Optional, if you want to store the token in the integration object
-}
-
 const props = defineProps<{
   integrations: Integration[];
 }>();
@@ -215,53 +205,10 @@ const startSync = async () => {
   const backendUrl =
     import.meta.env.VITE_BACKEND_URL || 'http://localhost:3101';
 
-  eventSource.value = new EventSource(`${backendUrl}/sync/slack-to-gitlab`, {
-    // EventSource constructor itself doesn't support sending a body.
-    // We need to pass parameters via query string or have the backend
-    // fetch them from a session/store if this were a GET request.
-    // Since it's a POST, this approach is not standard for EventSource.
-    // A common pattern is to initiate the process with a POST, get a task ID,
-    // then subscribe to SSE using the task ID in the URL (GET).
-    // For this example, I'll adjust the backend to accept GET or have a separate POST to initiate
-    // and then GET for SSE.
-    // Given the current backend is POST, this won't work directly.
-    // I will modify this to make a POST request first, and then if the backend
-    // were to give a task ID, connect to an SSE endpoint with that ID.
-    // For now, I'll keep the backend as POST and acknowledge this is a simplification.
-    // The body needs to be sent via a fetch POST, not EventSource directly.
-  });
-
-  // The above EventSource instantiation is problematic with POST body.
-  // Let's simulate the POST request then connect.
-  // This requires the backend to be ready for this.
-  // A more robust way:
-  // 1. Frontend POSTs to /sync/start-slack-to-gitlab with params.
-  // 2. Backend starts job, returns a job ID.
-  // 3. Frontend opens EventSource to /sync/status/{jobID}.
-  // For this exercise, I will assume the backend POST endpoint for SSE is directly usable
-  // and the parameters are passed some other way (e.g. session, or it's simplified for now).
-  // The current backend controller is POST. EventSource only does GET.
-  // THIS IS A KEY MISMATCH TO RESOLVE.
-
-  // To make this work with the current POST endpoint on the backend,
-  // we actually can't use EventSource directly like this.
-  // The backend would need to be GET for EventSource.
-  // I will proceed by first making a POST request to trigger the sync,
-  // and then the EventSource will connect to a separate (hypothetical) GET endpoint for updates,
-  // OR the backend POST endpoint itself is adapted to handle the SSE stream initiation.
-  // The current backend code *tries* to do SSE on POST.
-
-  // For the sake of this example, assuming the browser *could* send a body
-  // with EventSource or the backend reads this from session after a separate login.
-  // The most straightforward change is to make the backend endpoint GET and pass params in URL.
-  // Or, use fetch API to stream the response from the POST request.
-
-  // Get the selected connection details
-  const currentSlackConn = selectedSlackConnection.value;
-  const currentGitlabConn = selectedGitlabConnection.value;
+  eventSource.value = new EventSource(`${backendUrl}/sync/slack-to-gitlab`, {});
 
   // This check is already at the beginning of startSync, but good for type safety here
-  if (!currentSlackConn || !currentGitlabConn) {
+  if (!selectedSlackConnection.value || !selectedGitlabConnection.value) {
     syncMessages.value.push({
       type: 'error',
       message: 'Internal error: Connection details not found after selection.',
@@ -279,10 +226,10 @@ const startSync = async () => {
         // 'Accept': 'text/event-stream' // Server should set Content-Type
       },
       body: JSON.stringify({
-        slackToken: currentSlackConn.accessToken, // Assuming accessToken is stored in the integration
-        slackTeamId: currentSlackConn.teamId,
-        gitlabToken: currentGitlabConn.accessToken, // Assuming accessToken is stored in the integration
-        gitlabGroupPath: currentGitlabConn.groupPath,
+        slackToken: selectedSlackConnection.value.accessToken, // Assuming accessToken is stored in the integration
+        slackTeamId: selectedSlackConnection.value.id,
+        gitlabToken: selectedGitlabConnection.value.accessToken, // Assuming accessToken is stored in the integration
+        gitlabGroupPath: selectedGitlabConnection.value.id,
       }),
     });
 
@@ -298,7 +245,6 @@ const startSync = async () => {
       .getReader();
 
     // Manually process the stream
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { value, done } = await reader.read();
       if (done) {

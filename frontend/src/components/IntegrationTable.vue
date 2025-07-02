@@ -22,10 +22,10 @@
     </div>
 
     <DataTable
-      v-if="integrations.length"
-      :value="integrations"
+      v-if="props.integrations.length"
+      :value="props.integrations"
       class="mb-6"
-      dataKey="key"
+      dataKey="id"
     >
       <Column field="type" header="Type">
         <template #body="slotProps">
@@ -150,25 +150,9 @@
 </template>
 
 <script setup lang="ts">
-interface Integration {
-  type: string;
-  status: string;
-  name?: string;
-  teamId?: string;
-  groupPath?: string;
-  key?: string;
-}
 const props = defineProps<{
   integrations: Integration[];
 }>();
-
-// const emit = defineEmits(['refresh-integrations']); // Not currently used, but good for future
-
-type Emoji = {
-  id: string;
-  url: string;
-  name: string;
-};
 
 const selectedIntegration = ref();
 const displayedEmojis = ref<Emoji[]>([]);
@@ -284,8 +268,6 @@ async function fetchGitlabEmojis(groupPath: string) {
   );
   if (!res.ok) {
     if (res.status === 401) {
-      // Specific handling for 401 may involve triggering re-authentication
-      // For now, just throw an error that can be caught by the caller
       throw new Error(
         'Unauthorized to fetch GitLab emojis. Token might be expired.'
       );
@@ -307,10 +289,10 @@ async function viewEmojis(integration: Integration) {
   deleteAllSuccessMessage.value = '';
 
   try {
-    if (integration.type === 'slack' && integration.teamId) {
-      displayedEmojis.value = await fetchSlackEmojis(integration.teamId);
-    } else if (integration.type === 'gitlab' && integration.groupPath) {
-      displayedEmojis.value = await fetchGitlabEmojis(integration.groupPath);
+    if (integration.type === 'slack' && integration.id) {
+      displayedEmojis.value = await fetchSlackEmojis(integration.id);
+    } else if (integration.type === 'gitlab' && integration.id) {
+      displayedEmojis.value = await fetchGitlabEmojis(integration.id);
     } else {
       throw new Error(
         'Integration type or required ID (teamId/groupPath) is missing.'
@@ -334,7 +316,7 @@ async function deleteAllGitLabEmojis() {
   if (
     !currentIntegration.value ||
     currentIntegration.value.type !== 'gitlab' ||
-    !currentIntegration.value.groupPath
+    !currentIntegration.value.id
   ) {
     deleteAllError.value =
       'Cannot delete emojis: No GitLab integration selected or groupPath is missing.';
@@ -362,7 +344,7 @@ async function deleteAllGitLabEmojis() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${tokenData.access_token}`,
         },
-        body: JSON.stringify({ groupPath: currentIntegration.value.groupPath }),
+        body: JSON.stringify({ groupPath: currentIntegration.value.id }),
       }
     );
 
@@ -376,10 +358,7 @@ async function deleteAllGitLabEmojis() {
 
     deleteAllSuccessMessage.value =
       result.message || 'All emojis deleted successfully.';
-    displayedEmojis.value = []; // Clear displayed emojis as they are now deleted
-    // Optionally, re-fetch emojis to confirm they are gone, or just close dialog
-    // For now, we just clear them and show success.
-    // emojiDialogVisible.value = false; // Or keep it open to show the message
+    displayedEmojis.value = [];
   } catch (error: any) {
     console.error('Error deleting all GitLab emojis:', error);
     deleteAllError.value =
@@ -404,15 +383,12 @@ function getSeverity(integration: Integration) {
 
 const reconnectIntegration = (integration: Integration) => {
   if (integration.type === 'slack') {
-    // Clear potentially stale data before redirecting
     localStorage.removeItem('slackData');
     window.location.href = slackOAuthUrl;
   } else if (integration.type === 'gitlab') {
-    // Clear potentially stale data before redirecting
     localStorage.removeItem('gitlabData');
     window.location.href = gitlabOAuthUrl;
   }
-  // After redirecting for OAuth, the onMounted hook in index.vue should re-check statuses.
 };
 
 const emit = defineEmits(['delete-integration']);
@@ -421,7 +397,3 @@ function deleteIntegration(integration: Integration) {
   emit('delete-integration', integration);
 }
 </script>
-
-<style scoped>
-/* Optionnel : ajuste la hauteur max du tableau si besoin */
-</style>

@@ -9,19 +9,9 @@
 </template>
 
 <script setup lang="ts">
-interface Integration {
-  type: string;
-  status: string;
-  name?: string; // e.g., Slack team name or GitLab group path
-  teamId?: string; // For Slack
-  groupPath?: string; // For GitLab - this will be the specific group path
-  key: string; // Unique key for Vue list rendering, e.g., "gitlab-group/path"
-  accessToken?: string; // Optional, if you want to store the token in the integration object
-}
 const integrations = ref<Integration[]>([]);
 const isLoading = ref(true);
 
-// Helper to get parsed GitLab data from localStorage
 function getGitLabDataFromStorage() {
   const gitlabDataString = localStorage.getItem('gitlabData');
   if (!gitlabDataString) return null;
@@ -42,20 +32,7 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
     !gitlabStorageData.groups ||
     gitlabStorageData.groups.length === 0
   ) {
-    // If gitlabData exists but no groups, it means user is connected but has no usable groups.
-    // We might still want to show a generic "GitLab Connected" status or nothing.
-    // For now, returning empty array means no GitLab rows will be shown if no groups.
-    // If there's an access_token, it means the user did connect.
     if (gitlabStorageData && gitlabStorageData.access_token) {
-      // Could return a single entry representing the user's GitLab connection without specific groups
-      // For example:
-      // return [{
-      //   type: 'gitlab',
-      //   status: 'Connecté (aucun groupe avec emojis)',
-      //   name: gitlabStorageData.user?.name || gitlabStorageData.user?.username || 'Utilisateur GitLab',
-      //   key: 'gitlab-user',
-      //   groupPath: undefined // No specific group
-      // }];
       console.log(
         'GitLab connected, but no groups found with emoji permissions.'
       );
@@ -77,8 +54,8 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
               accessToken: gitlabStorageData.access_token,
               refreshToken: gitlabStorageData.refresh_token,
               user: gitlabStorageData.user,
-              groups: gitlabStorageData.groups, // Send the whole list of groups
-              groupPath: groupPath, // The specific group being checked
+              groups: gitlabStorageData.groups,
+              groupPath: groupPath,
             }),
           }
         );
@@ -86,7 +63,6 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
         const data = await res.json();
 
         if (res.ok && data.connected) {
-          // IMPORTANT: If token was refreshed, update localStorage
           if (
             data.tokenData &&
             data.tokenData.access_token !== gitlabStorageData.access_token
@@ -94,7 +70,6 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
             console.log(
               `GitLab token refreshed for group: ${groupPath}. Updating localStorage.`
             );
-            // Preserve other potential top-level keys in gitlabStorageData if any, merge with new tokenData
             const newGitlabStorageData = {
               ...gitlabStorageData,
               ...data.tokenData,
@@ -103,31 +78,23 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
               'gitlabData',
               JSON.stringify(newGitlabStorageData)
             );
-            // Update the reference for subsequent checks in this loop if needed, though map runs them in parallel.
-            // More robustly, the parent onMounted should re-fetch or this function should ensure all calls get the new token.
-            // For simplicity here, we update localStorage. Subsequent page loads will use it.
-            // A more advanced solution might involve a shared reactive store for token data.
           }
           return {
+            id: groupPath,
             type: 'gitlab',
             status: 'Connecté',
-            name: groupPath, // Display the group path as its name
-            groupPath: groupPath,
-            key: `gitlab-${groupPath}`,
-            accessToken: gitlabStorageData.access_token, // Include access token if needed
+            accessToken: gitlabStorageData.access_token,
+            name: groupPath,
           };
         } else {
-          // If needsReAuthentication is true, or any other error
           if (data.needsReAuthentication) {
             localStorage.removeItem('gitlabData'); // Clear data to force re-auth
           }
           return {
+            id: groupPath,
             type: 'gitlab',
             status: `Déconnecté: ${data.error || 'Veuillez vous reconnecter'}`,
             name: groupPath,
-            groupPath: groupPath,
-            key: `gitlab-${groupPath}`,
-            accessToken: gitlabStorageData.access_token, // Include access token if needed
           };
         }
       } catch (e) {
@@ -136,11 +103,10 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
           e
         );
         return {
+          id: groupPath,
           type: 'gitlab',
           status: 'Erreur de connexion',
           name: groupPath,
-          groupPath: groupPath,
-          key: `gitlab-${groupPath}`,
         };
       }
     }
@@ -198,12 +164,11 @@ async function checkSlackStatus(): Promise<Integration | null> {
       // Backend's /connected response includes team details from auth.test
       // e.g., data.team.name, data.team_id (which should match teamId)
       return {
+        id: teamId,
         type: 'slack',
         status: 'Connecté',
-        name: data.team?.name || slackStorageData.team?.name || teamId, // Prefer fresh name from auth.test
-        teamId: teamId,
-        key: `slack-${teamId}`,
-        accessToken: accessToken, // Include access token if needed
+        name: slackStorageData.team.name || teamId,
+        accessToken: accessToken,
       };
     } else {
       // If backend indicates disconnection (e.g. token invalid from auth.test)
@@ -211,22 +176,20 @@ async function checkSlackStatus(): Promise<Integration | null> {
         localStorage.removeItem('slackData'); // Clear data to force re-auth
       }
       return {
+        id: teamId,
         type: 'slack',
         status: `Déconnecté: ${data.error || 'Veuillez vous reconnecter'}`,
         name: slackStorageData.team?.name || teamId,
-        teamId: teamId,
-        key: `slack-${teamId}`,
       };
     }
   } catch (e) {
     console.error(`Error checking Slack connection for team ${teamId}:`, e);
     // Don't remove localStorage here, could be a temporary network issue
     return {
+      id: teamId,
       type: 'slack',
       status: 'Erreur de connexion',
       name: slackStorageData.team?.name || teamId,
-      teamId: teamId,
-      key: `slack-${teamId}`,
     };
   }
 }
@@ -264,7 +227,7 @@ const deleteIntegration = (integration: Integration) => {
   }
   // Remove from list
   integrations.value = integrations.value.filter(
-    (i) => i.key !== integration.key
+    (i) => i.id !== integration.id
   );
 };
 </script>

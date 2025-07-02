@@ -255,6 +255,78 @@ export async function refreshToken(currentRefreshToken, groupPathForLogHint) {
   }
 }
 
+export async function deleteAllEmojisForGroup(accessToken, groupPath) {
+  console.log(`Starting deletion of all emojis for group: ${groupPath}`);
+  let existingEmojis;
+  try {
+    existingEmojis = await getEmojis(accessToken, groupPath);
+  } catch (error) {
+    console.error(`Failed to fetch emojis for group ${groupPath} before deletion:`, error.message);
+    // If we can't get the emojis, we can't delete them. Re-throw or handle as appropriate.
+    // It might be a 404 if the group doesn't exist or a 401 if token is bad.
+    const serviceError = new Error(`Failed to retrieve emojis for group ${groupPath}. Cannot proceed with deletion. Original error: ${error.message}`);
+    serviceError.status = error.status || 500;
+    throw serviceError;
+  }
+
+  if (!existingEmojis || existingEmojis.length === 0) {
+    console.log(`No custom emojis found for group ${groupPath}. Nothing to delete.`);
+    return {
+      success: true,
+      message: 'No custom emojis found for this group.',
+      deletedCount: 0,
+      errors: [],
+    };
+  }
+
+  console.log(`Found ${existingEmojis.length} emojis to delete for group ${groupPath}.`);
+  const deletionResults = {
+    success: true, // Overall success, may be set to false if any deletion fails critically
+    deletedCount: 0,
+    errors: [], // To store info about individual emoji deletion failures
+  };
+
+  for (const emoji of existingEmojis) {
+    try {
+      console.log(`Attempting to delete emoji: ${emoji.name} (ID: ${emoji.id}) from group ${groupPath}`);
+      await deleteEmoji(accessToken, groupPath, emoji.id);
+      deletionResults.deletedCount++;
+      console.log(`Successfully deleted emoji: ${emoji.name} (ID: ${emoji.id})`);
+    } catch (error) {
+      console.error(`Failed to delete emoji ${emoji.name} (ID: ${emoji.id}) from group ${groupPath}:`, error.message);
+      deletionResults.errors.push({
+        emojiName: emoji.name,
+        emojiId: emoji.id,
+        error: error.message,
+        status: error.status || 500,
+      });
+      // Decide if one failure should stop the whole process or just be logged.
+      // For now, we continue trying to delete other emojis.
+      // If any error occurs, we can mark overall success as false.
+      deletionResults.success = false;
+    }
+  }
+
+  // Invalidate cache for the group after all deletions are attempted
+  if (emojis.gitlab[groupPath]) {
+    delete emojis.gitlab[groupPath];
+    console.log(`Cache invalidated for group ${groupPath} after mass deletion.`);
+  }
+
+  if (deletionResults.errors.length > 0) {
+    console.warn(`Completed deletion process for group ${groupPath} with ${deletionResults.errors.length} errors.`);
+  } else {
+    console.log(`Successfully deleted all ${deletionResults.deletedCount} emojis for group ${groupPath}.`);
+  }
+
+  return {
+    ...deletionResults,
+    message: deletionResults.errors.length > 0
+      ? `Completed deletion with ${deletionResults.errors.length} errors. ${deletionResults.deletedCount} emojis deleted.`
+      : `Successfully deleted ${deletionResults.deletedCount} emojis.`,
+  };
+}
+
 export async function checkConnection(
   currentAccessToken,
   currentRefreshToken,

@@ -16,13 +16,15 @@ router.get('/callback', async (req, res) => {
     res.redirect(`${process.env.FRONT_URL}/slack/callback?token=${b64Token}`);
   } catch (err) {
     console.error('Error in Slack OAuth callback:', err.message);
-    res.status(500).send(err.message || 'Server error during Slack OAuth callback');
+    res
+      .status(500)
+      .send(err.message || 'Server error during Slack OAuth callback');
   }
 });
 
 router.post('/connected', async (req, res) => {
   const accessToken = extractToken(req);
-  const { teamId } = req.body; // teamId is used for logging/context in service
+  const { teamId } = req.body;
 
   if (!accessToken) {
     return res
@@ -31,7 +33,10 @@ router.post('/connected', async (req, res) => {
   }
 
   try {
-    const connectionData = await SlackService.checkConnection(accessToken, teamId);
+    const connectionData = await SlackService.checkConnection(
+      accessToken,
+      teamId
+    );
     res.json(connectionData);
   } catch (error) {
     console.error(
@@ -40,11 +45,11 @@ router.post('/connected', async (req, res) => {
     );
     const status = error.status || 500;
     const responseJson = {
-        connected: false,
-        error: error.message || 'Server error while checking Slack connection.',
+      connected: false,
+      error: error.message || 'Server error while checking Slack connection.',
     };
     if (error.needsReAuthentication) {
-        responseJson.needsReAuthentication = true;
+      responseJson.needsReAuthentication = true;
     }
     res.status(status).json(responseJson);
   }
@@ -67,8 +72,10 @@ router.get('/emojis', async (req, res) => {
     const emojiList = await SlackService.getEmojis(accessToken, teamId);
     res.json(emojiList);
   } catch (error) {
-    console.error(`Error fetching Slack emojis for team ${teamId}:`, error.message);
-    // Assuming service throws error with message from Slack API if available
+    console.error(
+      `Error fetching Slack emojis for team ${teamId}:`,
+      error.message
+    );
     res.status(500).send(error.message || 'Error fetching Slack emojis');
   }
 });

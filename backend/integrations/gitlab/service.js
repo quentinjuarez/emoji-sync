@@ -136,7 +136,10 @@ export async function createEmoji(accessToken, groupPath, name, url) {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${accessToken}`,
     },
-    body: JSON.stringify({ query: mutation, variables: { groupPath, name, url } }),
+    body: JSON.stringify({
+      query: mutation,
+      variables: { groupPath, name, url },
+    }),
   });
 
   const result = await gqlRes.json();
@@ -191,7 +194,10 @@ export async function deleteEmoji(accessToken, groupPath, emojiId) {
   }
 
   const mutationData = result.data?.destroyCustomEmoji;
-  if (result.errors || (mutationData?.errors && mutationData.errors.length > 0)) {
+  if (
+    result.errors ||
+    (mutationData?.errors && mutationData.errors.length > 0)
+  ) {
     const errorDetails = result.errors || mutationData.errors;
     console.error('GraphQL Error deleting emoji:', errorDetails);
     const error = new Error('Failed to delete emoji');
@@ -245,81 +251,95 @@ export async function refreshToken(currentRefreshToken, groupPathForLogHint) {
       `Error refreshing token for group path hint ${groupPathForLogHint}:`,
       error
     );
-    throw error; // Re-throw the error to be caught by the caller
+    throw error;
   }
 }
 
-export async function checkConnection(currentAccessToken, currentRefreshToken, user, groups, groupPath) {
+export async function checkConnection(
+  currentAccessToken,
+  currentRefreshToken,
+  user,
+  groups,
+  groupPath
+) {
   try {
     let userRes = await fetch('https://gitlab.com/api/v4/user', {
-        headers: { Authorization: `Bearer ${currentAccessToken}` },
+      headers: { Authorization: `Bearer ${currentAccessToken}` },
     });
 
     let tokenToReturnToFrontend = {
-        access_token: currentAccessToken,
-        refresh_token: currentRefreshToken,
-        user: user,
-        groups: groups,
+      access_token: currentAccessToken,
+      refresh_token: currentRefreshToken,
+      user: user,
+      groups: groups,
     };
 
     if (userRes.status === 401) {
-        if (!currentRefreshToken) {
-            const error = new Error('Token expired and no refresh token provided. Please re-authenticate.');
-            error.status = 401;
-            error.needsReAuthentication = true;
-            throw error;
-        }
-        console.log(`Token for group path hint ${groupPath} expired, attempting refresh...`);
-        const refreshedTokenData = await refreshToken(currentRefreshToken, groupPath); // Pass groupPath for logging
+      if (!currentRefreshToken) {
+        const error = new Error(
+          'Token expired and no refresh token provided. Please re-authenticate.'
+        );
+        error.status = 401;
+        error.needsReAuthentication = true;
+        throw error;
+      }
+      console.log(
+        `Token for group path hint ${groupPath} expired, attempting refresh...`
+      );
+      const refreshedTokenData = await refreshToken(
+        currentRefreshToken,
+        groupPath
+      );
 
-        // Verify the new token
-        userRes = await fetch('https://gitlab.com/api/v4/user', {
-            headers: { Authorization: `Bearer ${refreshedTokenData.access_token}` },
-        });
+      userRes = await fetch('https://gitlab.com/api/v4/user', {
+        headers: { Authorization: `Bearer ${refreshedTokenData.access_token}` },
+      });
 
-        if (userRes.status === 401) {
-            const error = new Error('Token refresh failed or new token is also invalid. Please re-authenticate.');
-            error.status = 401;
-            error.needsReAuthentication = true;
-            throw error;
-        }
-        tokenToReturnToFrontend = {
-            ...refreshedTokenData,
-            user: user,
-            groups: groups,
-        };
+      if (userRes.status === 401) {
+        const error = new Error(
+          'Token refresh failed or new token is also invalid. Please re-authenticate.'
+        );
+        error.status = 401;
+        error.needsReAuthentication = true;
+        throw error;
+      }
+      tokenToReturnToFrontend = {
+        ...refreshedTokenData,
+        user: user,
+        groups: groups,
+      };
     }
 
     if (!userRes.ok) {
-        const errorText = await userRes.text();
-        const error = new Error(`GitLab API error: ${userRes.statusText}. Details: ${errorText}`);
-        error.status = userRes.status;
-        throw error;
+      const errorText = await userRes.text();
+      const error = new Error(
+        `GitLab API error: ${userRes.statusText}. Details: ${errorText}`
+      );
+      error.status = userRes.status;
+      throw error;
     }
 
     const userDataFromApi = await userRes.json();
     if (!userDataFromApi.id) {
-        const error = new Error('Failed to fetch user info after potential refresh, user ID missing.');
-        error.status = 400; // Bad request or server error?
-        throw error;
+      const error = new Error(
+        'Failed to fetch user info after potential refresh, user ID missing.'
+      );
+      error.status = 400;
+      throw error;
     }
 
-    // The user object within tokenToReturnToFrontend should ideally be updated with userDataFromApi
-    // if it's meant to reflect the latest state from GitLab.
-    // However, current logic preserves the user object passed from the frontend.
-    // If userDataFromApi is more current, consider:
-    // tokenToReturnToFrontend.user = userDataFromApi;
-    // And ensure 'groups' are also potentially refreshed or verified if necessary.
-
     return { connected: true, tokenData: tokenToReturnToFrontend };
-
   } catch (error) {
-    // Ensure status and needsReAuthentication are propagated
-    console.error(`Error in checkConnection for groupPath ${groupPath}:`, error.message);
-    const serviceError = new Error(error.message || 'Error checking GitLab connection.');
+    console.error(
+      `Error in checkConnection for groupPath ${groupPath}:`,
+      error.message
+    );
+    const serviceError = new Error(
+      error.message || 'Error checking GitLab connection.'
+    );
     serviceError.status = error.status || 500;
     if (error.needsReAuthentication) {
-        serviceError.needsReAuthentication = true;
+      serviceError.needsReAuthentication = true;
     }
     throw serviceError;
   }

@@ -29,11 +29,8 @@ router.get('/callback', async (req, res) => {
     res.redirect(`${process.env.FRONT_URL}/gitlab/callback?token=${b64Token}`);
   } catch (err) {
     console.error('GitLab OAuth Callback Error:', err.message);
-    // It's good practice to check if err has a status code
     const status = err.status || 500;
-    const message =
-      status === 500 ? 'OAuth Error with GitLab' : err.message;
-    // If the error is from our service (e.g. token exchange failed), it might have details
+    const message = status === 500 ? 'OAuth Error with GitLab' : err.message;
     const responseJson = { error: message };
     if (err.details) {
       responseJson.details = err.details;
@@ -59,7 +56,6 @@ router.get('/emojis', async (req, res) => {
   } catch (error) {
     console.error('Error in /emojis endpoint:', error.message);
     const status = error.status || 500;
-    // Send error.message if available and it's a client-side error, otherwise a generic message
     const message =
       status < 500
         ? error.message
@@ -92,9 +88,11 @@ router.post('/emoji', async (req, res) => {
   } catch (err) {
     console.error('Error in /emoji POST endpoint:', err.message);
     const status = err.status || 500;
-    const responseJson = { error: err.message || 'Server error while creating emoji' };
+    const responseJson = {
+      error: err.message || 'Server error while creating emoji',
+    };
     if (err.details) {
-        responseJson.details = err.details;
+      responseJson.details = err.details;
     }
     res.status(status).json(responseJson);
   }
@@ -123,9 +121,11 @@ router.delete('/emoji', async (req, res) => {
   } catch (err) {
     console.error('Error in /emoji DELETE endpoint:', err.message);
     const status = err.status || 500;
-    const responseJson = { error: err.message || 'Server error while deleting emoji'};
+    const responseJson = {
+      error: err.message || 'Server error while deleting emoji',
+    };
     if (err.details) {
-        responseJson.details = err.details;
+      responseJson.details = err.details;
     }
     res.status(status).json(responseJson);
   }
@@ -162,11 +162,11 @@ router.post('/connected', async (req, res) => {
     console.error('Error in /connected endpoint:', error.message);
     const status = error.status || 500;
     const responseJson = {
-        connected: false,
-        error: error.message || 'Error checking GitLab connection',
+      connected: false,
+      error: error.message || 'Error checking GitLab connection',
     };
     if (error.needsReAuthentication) {
-        responseJson.needsReAuthentication = true;
+      responseJson.needsReAuthentication = true;
     }
     res.status(status).json(responseJson);
   }

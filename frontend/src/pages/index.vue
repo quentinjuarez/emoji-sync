@@ -1,8 +1,11 @@
 <template>
   <main class="p-6">
-    <Integrations :integrations="integrations" />
+    <IntegrationTable
+      :integrations="integrations"
+      @delete-integration="deleteIntegration"
+    />
     <SyncPoc />
-    <!-- <Sync :integrations="integrations" /> -->
+    <!-- <IntegrationSync :integrations="integrations" /> -->
   </main>
 </template>
 
@@ -34,87 +37,112 @@ function getGitLabDataFromStorage() {
 // This function will now generate a list of promises for each GitLab group
 async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
   const gitlabStorageData = getGitLabDataFromStorage();
-  if (!gitlabStorageData || !gitlabStorageData.groups || gitlabStorageData.groups.length === 0) {
+  if (
+    !gitlabStorageData ||
+    !gitlabStorageData.groups ||
+    gitlabStorageData.groups.length === 0
+  ) {
     // If gitlabData exists but no groups, it means user is connected but has no usable groups.
     // We might still want to show a generic "GitLab Connected" status or nothing.
     // For now, returning empty array means no GitLab rows will be shown if no groups.
     // If there's an access_token, it means the user did connect.
     if (gitlabStorageData && gitlabStorageData.access_token) {
-        // Could return a single entry representing the user's GitLab connection without specific groups
-        // For example:
-        // return [{
-        //   type: 'gitlab',
-        //   status: 'Connecté (aucun groupe avec emojis)',
-        //   name: gitlabStorageData.user?.name || gitlabStorageData.user?.username || 'Utilisateur GitLab',
-        //   key: 'gitlab-user',
-        //   groupPath: undefined // No specific group
-        // }];
-        console.log("GitLab connected, but no groups found with emoji permissions.");
+      // Could return a single entry representing the user's GitLab connection without specific groups
+      // For example:
+      // return [{
+      //   type: 'gitlab',
+      //   status: 'Connecté (aucun groupe avec emojis)',
+      //   name: gitlabStorageData.user?.name || gitlabStorageData.user?.username || 'Utilisateur GitLab',
+      //   key: 'gitlab-user',
+      //   groupPath: undefined // No specific group
+      // }];
+      console.log(
+        'GitLab connected, but no groups found with emoji permissions.'
+      );
     }
     return [];
   }
 
-  const groupPromises = gitlabStorageData.groups.map(async (groupPath: string) => {
-    try {
-      const res = await fetch(`${import.meta.env.VITE_BACK_URL}/gitlab/connected`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          accessToken: gitlabStorageData.access_token,
-          refreshToken: gitlabStorageData.refresh_token,
-          user: gitlabStorageData.user,
-          groups: gitlabStorageData.groups, // Send the whole list of groups
-          groupPath: groupPath, // The specific group being checked
-        }),
-      });
+  const groupPromises = gitlabStorageData.groups.map(
+    async (groupPath: string) => {
+      try {
+        const res = await fetch(
+          `${import.meta.env.VITE_BACK_URL}/gitlab/connected`,
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              accessToken: gitlabStorageData.access_token,
+              refreshToken: gitlabStorageData.refresh_token,
+              user: gitlabStorageData.user,
+              groups: gitlabStorageData.groups, // Send the whole list of groups
+              groupPath: groupPath, // The specific group being checked
+            }),
+          }
+        );
 
-      const data = await res.json();
+        const data = await res.json();
 
-      if (res.ok && data.connected) {
-        // IMPORTANT: If token was refreshed, update localStorage
-        if (data.tokenData && data.tokenData.access_token !== gitlabStorageData.access_token) {
-          console.log(`GitLab token refreshed for group: ${groupPath}. Updating localStorage.`);
-          // Preserve other potential top-level keys in gitlabStorageData if any, merge with new tokenData
-          const newGitlabStorageData = { ...gitlabStorageData, ...data.tokenData };
-          localStorage.setItem('gitlabData', JSON.stringify(newGitlabStorageData));
-          // Update the reference for subsequent checks in this loop if needed, though map runs them in parallel.
-          // More robustly, the parent onMounted should re-fetch or this function should ensure all calls get the new token.
-          // For simplicity here, we update localStorage. Subsequent page loads will use it.
-          // A more advanced solution might involve a shared reactive store for token data.
+        if (res.ok && data.connected) {
+          // IMPORTANT: If token was refreshed, update localStorage
+          if (
+            data.tokenData &&
+            data.tokenData.access_token !== gitlabStorageData.access_token
+          ) {
+            console.log(
+              `GitLab token refreshed for group: ${groupPath}. Updating localStorage.`
+            );
+            // Preserve other potential top-level keys in gitlabStorageData if any, merge with new tokenData
+            const newGitlabStorageData = {
+              ...gitlabStorageData,
+              ...data.tokenData,
+            };
+            localStorage.setItem(
+              'gitlabData',
+              JSON.stringify(newGitlabStorageData)
+            );
+            // Update the reference for subsequent checks in this loop if needed, though map runs them in parallel.
+            // More robustly, the parent onMounted should re-fetch or this function should ensure all calls get the new token.
+            // For simplicity here, we update localStorage. Subsequent page loads will use it.
+            // A more advanced solution might involve a shared reactive store for token data.
+          }
+          return {
+            type: 'gitlab',
+            status: 'Connecté',
+            name: groupPath, // Display the group path as its name
+            groupPath: groupPath,
+            key: `gitlab-${groupPath}`,
+          };
+        } else {
+          // If needsReAuthentication is true, or any other error
+          if (data.needsReAuthentication) {
+            localStorage.removeItem('gitlabData'); // Clear data to force re-auth
+          }
+          return {
+            type: 'gitlab',
+            status: `Déconnecté: ${data.error || 'Veuillez vous reconnecter'}`,
+            name: groupPath,
+            groupPath: groupPath,
+            key: `gitlab-${groupPath}`,
+          };
         }
+      } catch (e) {
+        console.error(
+          `Error checking GitLab connection for group ${groupPath}:`,
+          e
+        );
         return {
           type: 'gitlab',
-          status: 'Connecté',
-          name: groupPath, // Display the group path as its name
-          groupPath: groupPath,
-          key: `gitlab-${groupPath}`,
-        };
-      } else {
-        // If needsReAuthentication is true, or any other error
-        if (data.needsReAuthentication) {
-          localStorage.removeItem('gitlabData'); // Clear data to force re-auth
-        }
-        return {
-          type: 'gitlab',
-          status: `Déconnecté: ${data.error || 'Veuillez vous reconnecter'}`,
+          status: 'Erreur de connexion',
           name: groupPath,
           groupPath: groupPath,
           key: `gitlab-${groupPath}`,
         };
       }
-    } catch (e) {
-      console.error(`Error checking GitLab connection for group ${groupPath}:`, e);
-      return {
-        type: 'gitlab',
-        status: 'Erreur de connexion',
-        name: groupPath,
-        groupPath: groupPath,
-        key: `gitlab-${groupPath}`,
-      };
     }
-  });
+  );
 
   return Promise.all(groupPromises);
 }
@@ -150,14 +178,17 @@ async function checkSlackStatus(): Promise<Integration | null> {
   const accessToken = slackStorageData.access_token;
 
   try {
-    const res = await fetch(`${import.meta.env.VITE_BACK_URL}/slack/connected`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${accessToken}`,
-      },
-      body: JSON.stringify({ teamId: teamId }), // Backend expects teamId in body
-    });
+    const res = await fetch(
+      `${import.meta.env.VITE_BACK_URL}/slack/connected`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ teamId: teamId }), // Backend expects teamId in body
+      }
+    );
 
     const data = await res.json(); // This is the response from our backend's /slack/connected
 
@@ -220,4 +251,17 @@ onMounted(async () => {
   integrations.value = newIntegrations;
   isLoading.value = false;
 });
+
+const deleteIntegration = (integration: Integration) => {
+  // Remove from localStorage if relevant
+  if (integration.type === 'slack') {
+    localStorage.removeItem('slackData');
+  } else if (integration.type === 'gitlab') {
+    localStorage.removeItem('gitlabData');
+  }
+  // Remove from list
+  integrations.value = integrations.value.filter(
+    (i) => i.key !== integration.key
+  );
+};
 </script>

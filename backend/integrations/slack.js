@@ -53,7 +53,9 @@ router.get('/callback', async (req, res) => {
     // }
     // We need to ensure the frontend receives all necessary parts, especially access_token and team info.
 
-    const b64Token = Buffer.from(JSON.stringify(tokenDataFromSlack)).toString('base64');
+    const b64Token = Buffer.from(JSON.stringify(tokenDataFromSlack)).toString(
+      'base64'
+    );
     res.redirect(`${process.env.FRONT_URL}/slack/callback?token=${b64Token}`);
   } catch (err) {
     console.error('Error in Slack OAuth callback:', err);
@@ -69,7 +71,9 @@ router.post('/connected', async (req, res) => {
   const { teamId } = req.body; // Frontend should send teamId for context if available
 
   if (!accessToken) {
-    return res.status(401).json({ connected: false, error: 'Unauthorized: Missing access token.' });
+    return res
+      .status(401)
+      .json({ connected: false, error: 'Unauthorized: Missing access token.' });
   }
 
   try {
@@ -84,7 +88,11 @@ router.post('/connected', async (req, res) => {
     const authTestData = await authTestRes.json();
 
     if (!authTestData.ok) {
-      console.warn(`Slack auth.test failed for token (team hint: ${teamId || 'N/A'}): ${authTestData.error}`);
+      console.warn(
+        `Slack auth.test failed for token (team hint: ${teamId || 'N/A'}): ${
+          authTestData.error
+        }`
+      );
       // No server-side token store to clean, frontend will handle localStorage removal.
       return res.status(401).json({
         connected: false,
@@ -105,8 +113,14 @@ router.post('/connected', async (req, res) => {
       bot_id: authTestData.bot_id, // if applicable
     });
   } catch (error) {
-    console.error(`Error checking Slack connection (team hint: ${teamId || 'N/A'}):`, error);
-    res.status(500).json({ connected: false, error: 'Server error while checking Slack connection.' });
+    console.error(
+      `Error checking Slack connection (team hint: ${teamId || 'N/A'}):`,
+      error
+    );
+    res.status(500).json({
+      connected: false,
+      error: 'Server error while checking Slack connection.',
+    });
   }
 });
 
@@ -121,7 +135,9 @@ router.get('/emojis', async (req, res) => {
     // While token is provided, teamId helps with caching.
     // If not critical and emoji list isn't team-specific from token perspective (it is), this might be optional.
     // However, Slack's emoji.list is workspace-specific, so context (teamId) is good.
-    return res.status(400).send('Missing teamId query parameter for caching context');
+    return res
+      .status(400)
+      .send('Missing teamId query parameter for caching context');
   }
 
   // Use cached emojis if available (cache key is teamId)
@@ -137,14 +153,27 @@ router.get('/emojis', async (req, res) => {
     const emojiData = await emojiRes.json();
 
     if (!emojiData.ok) {
-      console.error(`Slack emoji.list error for team ${teamId}: ${emojiData.error}`);
+      console.error(
+        `Slack emoji.list error for team ${teamId}: ${emojiData.error}`
+      );
       return res.status(500).send('Emoji error: ' + emojiData.error);
     }
 
-    // Cache emojis using teamId
-    emojis.slack[teamId] = emojiData.emoji;
+    const emojiList = Object.keys(emojiData.emoji).reduce((acc, emojiName) => {
+      if (emojiData.emoji[emojiName].startsWith('alias:')) return acc;
 
-    res.json(emojiData.emoji);
+      acc.push({
+        id: emojiName,
+        name: emojiName,
+        url: emojiData.emoji[emojiName],
+      });
+      return acc;
+    }, []);
+
+    // Cache emojis using teamId
+    emojis.slack[teamId] = emojiList;
+
+    res.json(emojiList);
   } catch (error) {
     console.error(`Error fetching Slack emojis for team ${teamId}:`, error);
     res.status(500).send('Error fetching Slack emojis');

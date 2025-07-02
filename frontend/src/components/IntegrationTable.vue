@@ -68,6 +68,16 @@
           />
         </template>
       </Column>
+      <Column header="Supprimer" style="width: 3rem; text-align: center">
+        <template #body="slotProps">
+          <Button
+            icon="pi pi-trash"
+            class="p-button-danger"
+            size="small"
+            @click="deleteIntegration(slotProps.data)"
+          />
+        </template>
+      </Column>
     </DataTable>
 
     <div
@@ -85,7 +95,7 @@
     >
       <div class="grid grid-cols-6 gap-3 max-h-[400px] overflow-auto">
         <div
-          v-for="(url, name) in displayedEmojis"
+          v-for="{ url, name } in displayedEmojis"
           :key="name"
           class="text-center border p-2 rounded"
         >
@@ -114,8 +124,14 @@ const props = defineProps<{
 
 // const emit = defineEmits(['refresh-integrations']); // Not currently used, but good for future
 
+type Emoji = {
+  id: string;
+  url: string;
+  name: string;
+};
+
 const selectedIntegration = ref();
-const displayedEmojis = ref<Record<string, string>>({});
+const displayedEmojis = ref<Emoji[]>([]);
 const emojiDialogVisible = ref(false);
 const isLoadingEmojis = ref(false); // To show loading state in the dialog
 
@@ -167,7 +183,10 @@ function getSlackTokenData() {
     if (parsed && parsed.ok && parsed.access_token) {
       return parsed;
     }
-    console.warn('Stored slackData is invalid or missing access_token.', parsed);
+    console.warn(
+      'Stored slackData is invalid or missing access_token.',
+      parsed
+    );
     localStorage.removeItem('slackData'); // Clear corrupted/invalid data
     return null;
   } catch (e) {
@@ -177,7 +196,6 @@ function getSlackTokenData() {
   }
 }
 
-
 async function fetchSlackEmojis(teamId: string) {
   const tokenData = getSlackTokenData();
   if (!tokenData || !tokenData.access_token) {
@@ -185,7 +203,9 @@ async function fetchSlackEmojis(teamId: string) {
   }
 
   const res = await fetch(
-    `${import.meta.env.VITE_BACK_URL}/slack/emojis?teamId=${encodeURIComponent(teamId)}`,
+    `${import.meta.env.VITE_BACK_URL}/slack/emojis?teamId=${encodeURIComponent(
+      teamId
+    )}`,
     {
       headers: {
         Authorization: `Bearer ${tokenData.access_token}`,
@@ -194,10 +214,14 @@ async function fetchSlackEmojis(teamId: string) {
   );
   if (!res.ok) {
     if (res.status === 401) {
-      throw new Error('Unauthorized to fetch Slack emojis. Token might be expired or invalid.');
+      throw new Error(
+        'Unauthorized to fetch Slack emojis. Token might be expired or invalid.'
+      );
     }
     const errorData = await res.text();
-    throw new Error(`Failed to fetch Slack emojis for team ${teamId}: ${res.status} ${errorData}`);
+    throw new Error(
+      `Failed to fetch Slack emojis for team ${teamId}: ${res.status} ${errorData}`
+    );
   }
   return await res.json();
 }
@@ -209,7 +233,9 @@ async function fetchGitlabEmojis(groupPath: string) {
   }
 
   const res = await fetch(
-    `${import.meta.env.VITE_BACK_URL}/gitlab/emojis?groupPath=${encodeURIComponent(groupPath)}`,
+    `${
+      import.meta.env.VITE_BACK_URL
+    }/gitlab/emojis?groupPath=${encodeURIComponent(groupPath)}`,
     {
       headers: {
         Authorization: `Bearer ${tokenData.access_token}`,
@@ -220,16 +246,20 @@ async function fetchGitlabEmojis(groupPath: string) {
     if (res.status === 401) {
       // Specific handling for 401 may involve triggering re-authentication
       // For now, just throw an error that can be caught by the caller
-      throw new Error('Unauthorized to fetch GitLab emojis. Token might be expired.');
+      throw new Error(
+        'Unauthorized to fetch GitLab emojis. Token might be expired.'
+      );
     }
     const errorData = await res.text();
-    throw new Error(`Failed to fetch GitLab emojis for ${groupPath}: ${res.status} ${errorData}`);
+    throw new Error(
+      `Failed to fetch GitLab emojis for ${groupPath}: ${res.status} ${errorData}`
+    );
   }
   return await res.json();
 }
 
 async function viewEmojis(integration: Integration) {
-  displayedEmojis.value = {}; // Clear previous emojis
+  displayedEmojis.value = [];
   emojiDialogVisible.value = true;
   isLoadingEmojis.value = true;
 
@@ -239,12 +269,13 @@ async function viewEmojis(integration: Integration) {
     } else if (integration.type === 'gitlab' && integration.groupPath) {
       displayedEmojis.value = await fetchGitlabEmojis(integration.groupPath);
     } else {
-      throw new Error('Integration type or required ID (teamId/groupPath) is missing.');
+      throw new Error(
+        'Integration type or required ID (teamId/groupPath) is missing.'
+      );
     }
   } catch (error) {
     console.error('Error fetching emojis:', error);
-    // Optionally, show an error message to the user in the dialog
-    displayedEmojis.value = { 'error': 'Could not load emojis.' };
+    displayedEmojis.value = [];
   } finally {
     isLoadingEmojis.value = false;
   }
@@ -275,6 +306,12 @@ const reconnectIntegration = (integration: Integration) => {
   }
   // After redirecting for OAuth, the onMounted hook in index.vue should re-check statuses.
 };
+
+const emit = defineEmits(['delete-integration']);
+
+function deleteIntegration(integration: Integration) {
+  emit('delete-integration', integration);
+}
 </script>
 
 <style scoped>

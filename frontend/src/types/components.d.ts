@@ -14,6 +14,8 @@ declare module 'vue' {
     Dialog: typeof import('primevue/dialog')['default']
     Dropdown: typeof import('primevue/dropdown')['default']
     Integrations: typeof import('./../components/Integrations.vue')['default']
+    IntegrationSync: typeof import('./../components/IntegrationSync.vue')['default']
+    IntegrationTable: typeof import('./../components/IntegrationTable.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
     Sync: typeof import('./../components/Sync.vue')['default']

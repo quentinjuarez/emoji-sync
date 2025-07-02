@@ -27,31 +27,54 @@
       class="mb-6"
       dataKey="type"
     >
-      <Column field="type" header="Type" />
-      <Column field="status" header="Statut" />
-      <Column header="Refresh">
+      <Column field="type" header="Type">
         <template #body="slotProps">
-          <Button
-            icon="pi pi-refresh"
-            @click="refreshIntegration(slotProps.data)"
-            size="small"
+          <span class="font-semibold">{{
+            slotProps.data.type === 'gitlab'
+              ? 'GitLab'
+              : slotProps.data.type === 'slack'
+              ? 'Slack'
+              : slotProps.data.type
+          }}</span>
+          <div v-if="slotProps.data.name" class="text-xs text-gray-500">
+            {{ slotProps.data.name }}
+          </div>
+        </template>
+      </Column>
+      <Column field="status" header="Statut">
+        <template #body="slotProps">
+          <Tag
+            :value="slotProps.data.status"
+            :severity="getSeverity(slotProps.data)"
           />
         </template>
       </Column>
-      <Column header="Actions">
+      <Column header="Actions" style="min-width: 12rem">
         <template #body="slotProps">
+          <Button
+            v-if="slotProps.data.status !== 'Connecté'"
+            icon="pi pi-refresh"
+            label="Reconnecter"
+            @click="reconnectIntegration(slotProps.data)"
+            size="small"
+            class="p-button-warning mr-2"
+          />
           <Button
             icon="pi pi-eye"
             label="Voir Emojis"
             @click="viewEmojis(slotProps.data)"
+            :disabled="slotProps.data.status !== 'Connecté'"
             size="small"
           />
         </template>
       </Column>
     </DataTable>
 
-    <div v-else class="text-center text-gray-500">
-      Aucune intégration connectée.
+    <div
+      v-if="!integrations || integrations.length === 0"
+      class="text-center text-gray-500"
+    >
+      Aucune intégration pour le moment. Cliquez sur "Ajouter une intégration".
     </div>
 
     <Dialog
@@ -75,9 +98,19 @@
 </template>
 
 <script setup lang="ts">
+interface Integration {
+  type: string;
+  status: string;
+  name?: string;
+  teamId?: string;
+  groupPath?: string;
+}
 const props = defineProps<{
-  integrations: { type: string; status: string }[];
+  integrations: Integration[];
 }>();
+
+const emit = defineEmits(['refresh-integrations']);
+
 const selectedIntegration = ref();
 const displayedEmojis = ref<Record<string, string>>({});
 const emojiDialogVisible = ref(false);
@@ -145,12 +178,30 @@ function viewEmojis(integration: { type: string }) {
   }
 }
 
-const refreshIntegration = (integration: { type: string }) => {
+function getSeverity(integration: Integration) {
+  if (integration.status === 'Connecté') {
+    return 'success';
+  }
+  if (
+    integration.status?.startsWith('Déconnecté') ||
+    integration.status?.startsWith('Erreur')
+  ) {
+    return 'danger';
+  }
+  return 'info';
+}
+
+const reconnectIntegration = (integration: Integration) => {
   if (integration.type === 'slack') {
+    // Clear potentially stale data before redirecting
+    localStorage.removeItem('slackData');
     window.location.href = slackOAuthUrl;
   } else if (integration.type === 'gitlab') {
+    // Clear potentially stale data before redirecting
+    localStorage.removeItem('gitlabData');
     window.location.href = gitlabOAuthUrl;
   }
+  // After redirecting for OAuth, the onMounted hook in index.vue should re-check statuses.
 };
 </script>
 

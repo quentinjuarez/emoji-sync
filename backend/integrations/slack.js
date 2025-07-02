@@ -36,6 +36,62 @@ router.get('/callback', async (req, res) => {
   }
 });
 
+router.get('/connected', async (req, res) => {
+  const teamId = req.query.teamId;
+  if (!teamId) {
+    // Try to infer teamId if only one token exists (e.g., during initial setup or if UI doesn't have teamId yet)
+    const storedTeamIds = Object.keys(tokens.slack);
+    if (storedTeamIds.length === 1) {
+      // teamId = storedTeamIds[0]; // This is a potential auto-detection, but explicit teamId is better.
+      // For now, require teamId to be explicit.
+      return res.status(400).json({ connected: false, error: 'Missing teamId query parameter.' });
+    } else if (storedTeamIds.length === 0) {
+      return res.status(404).json({ connected: false, error: 'No Slack integration found.' });
+    } else {
+      // If multiple integrations, teamId is necessary to know which one to check
+      return res.status(400).json({ connected: false, error: 'Missing teamId and multiple Slack integrations exist.' });
+    }
+  }
+
+  const tokenData = tokens.slack[teamId];
+  if (!tokenData || !tokenData.access_token) {
+    return res.status(401).json({ connected: false, error: 'Unauthorized: No access token found for this teamId.' });
+  }
+
+  try {
+    const authTestRes = await fetch('https://slack.com/api/auth.test', {
+      method: 'POST', // Using POST as recommended by Slack docs for auth.test
+      headers: {
+        Authorization: `Bearer ${tokenData.access_token}`,
+        'Content-Type': 'application/json', // Though no body is sent, it's good practice
+      },
+    });
+
+    const authTestData = await authTestRes.json();
+
+    if (!authTestData.ok) {
+      // Token is invalid
+      console.warn(`Slack auth.test failed for team ${teamId}: ${authTestData.error}`);
+      // Clean up the invalid token from the store
+      delete tokens.slack[teamId];
+      delete emojis.slack[teamId]; // Also clear any cached emojis for this team
+      return res.status(401).json({ connected: false, error: `Token validation failed: ${authTestData.error}. Please re-authenticate.` });
+    }
+
+    // Token is active
+    res.json({
+      connected: true,
+      team: authTestData.team,
+      user: authTestData.user,
+      team_id: authTestData.team_id,
+      user_id: authTestData.user_id,
+    });
+  } catch (error) {
+    console.error(`Error checking Slack connection for team ${teamId}:`, error);
+    res.status(500).json({ connected: false, error: 'Server error while checking Slack connection.' });
+  }
+});
+
 router.get('/emojis', async (req, res) => {
   try {
     const teamId = req.query.teamId;

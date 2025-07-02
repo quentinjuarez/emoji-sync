@@ -5,6 +5,49 @@ const router = express.Router();
 
 import { emojis, tokens } from '../store.js';
 
+async function refreshToken(groupPath) {
+  const tokenData = tokens.gitlab[groupPath];
+  if (!tokenData || !tokenData.refresh_token) {
+    throw new Error('No refresh token available');
+  }
+
+  try {
+    const response = await fetch('https://gitlab.com/oauth/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: process.env.GITLAB_CLIENT_ID,
+        client_secret: process.env.GITLAB_CLIENT_SECRET,
+        refresh_token: tokenData.refresh_token,
+        grant_type: 'refresh_token',
+        redirect_uri: process.env.GITLAB_REDIRECT_URI, // Some OAuth providers require this
+      }),
+    });
+
+    const newTokenData = await response.json();
+    if (!newTokenData.access_token) {
+      console.error('Refresh token failed:', newTokenData);
+      // Remove invalid token so user has to re-auth
+      delete tokens.gitlab[groupPath];
+      throw new Error('Failed to refresh token');
+    }
+
+    // Update stored token, preserving user and groups info
+    tokens.gitlab[groupPath] = {
+      ...newTokenData,
+      user: tokenData.user,
+      groups: tokenData.groups,
+    };
+    console.log('Token refreshed successfully for group:', groupPath);
+    return tokens.gitlab[groupPath];
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    // Remove invalid token so user has to re-auth
+    delete tokens.gitlab[groupPath];
+    throw error; // Re-throw the error to be caught by the caller
+  }
+}
+
 router.get('/callback', async (req, res) => {
   const code = req.query.code;
   if (!code) return res.status(400).send('Missing code');
@@ -285,5 +328,70 @@ router.delete('/emoji', async (req, res) => {
 // [
 //     "Name has already been taken"
 // ]
+
+router.get('/connected', async (req, res) => {
+  const groupPath = req.query.groupPath;
+  if (!groupPath) return res.status(400).send('Missing groupPath');
+
+  const tokenData = tokens.gitlab[groupPath];
+  if (!tokenData || !tokenData.access_token) {
+    return res.status(401).json({ error: 'Unauthorized: No access token found' });
+  }
+
+  try {
+    // Test API call to check if token is active
+    const userRes = await fetch('https://gitlab.com/api/v4/user', {
+      headers: { Authorization: `Bearer ${tokenData.access_token}` },
+    });
+
+    let currentTokenData = tokenData;
+    if (userRes.status === 401) {
+      // Token is invalid or expired, try to refresh
+      try {
+        console.log(`Token for group ${groupPath} expired, attempting refresh...`);
+        currentTokenData = await refreshToken(groupPath);
+        // Retry the API call with the new token
+        userRes = await fetch('https://gitlab.com/api/v4/user', {
+          headers: { Authorization: `Bearer ${currentTokenData.access_token}` },
+        });
+
+        if (userRes.status === 401) {
+          // Refresh failed or new token also invalid
+          delete tokens.gitlab[groupPath]; // Clean up invalid token
+          return res.status(401).json({ connected: false, error: 'Token refresh failed or new token is also invalid. Please re-authenticate.' });
+        }
+      } catch (refreshError) {
+        console.error('Refresh token attempt failed:', refreshError.message);
+        delete tokens.gitlab[groupPath]; // Clean up if refresh fails
+        return res.status(401).json({ connected: false, error: `Token refresh failed: ${refreshError.message}. Please re-authenticate.` });
+      }
+    }
+
+    if (!userRes.ok) {
+      // Handle other API errors not related to 401
+      throw new Error(`GitLab API error: ${userRes.statusText} (status: ${userRes.status})`);
+    }
+
+    const userData = await userRes.json();
+    if (!userData.id) {
+      return res.status(400).json({ connected: false, error: 'Failed to fetch user info after potential refresh' });
+    }
+
+    // If token is active or successfully refreshed, return success
+    res.json({
+      connected: true,
+      user: currentTokenData.user,
+      groups: currentTokenData.groups,
+    });
+  } catch (error) {
+    console.error('Error checking GitLab connection:', error.message);
+    // Distinguish between known error types and generic server errors
+    if (error.message.includes('No refresh token available')) {
+        delete tokens.gitlab[groupPath]; // Clean up
+        return res.status(401).json({ connected: false, error: 'No refresh token available. Please re-authenticate.' });
+    }
+    res.status(500).send(`Error checking GitLab connection: ${error.message}`);
+  }
+});
 
 export default router;

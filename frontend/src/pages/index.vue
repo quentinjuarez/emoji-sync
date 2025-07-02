@@ -4,8 +4,7 @@
       :integrations="integrations"
       @delete-integration="deleteIntegration"
     />
-    <SyncPoc />
-    <!-- <IntegrationSync :integrations="integrations" /> -->
+    <IntegrationSync :integrations="integrations" />
   </main>
 </template>
 

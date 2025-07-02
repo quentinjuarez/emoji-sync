@@ -16,9 +16,10 @@ declare module 'vue' {
     Integrations: typeof import('./../components/Integrations.vue')['default']
     IntegrationSync: typeof import('./../components/IntegrationSync.vue')['default']
     IntegrationTable: typeof import('./../components/IntegrationTable.vue')['default']
+    OldSyncPoc: typeof import('./../components/OldSyncPoc.vue')['default']
     RouterLink: typeof import('vue-router')['RouterLink']
     RouterView: typeof import('vue-router')['RouterView']
-    Sync: typeof import('./../components/Sync.vue')['default']
+    Sync: typeof import('./.../components/OldSyncPoc.vuefault']
     SyncPoc: typeof import('./../components/SyncPoc.vue')['default']
     Tag: typeof import('primevue/tag')['default']
   }

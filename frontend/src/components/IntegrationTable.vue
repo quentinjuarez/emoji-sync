@@ -60,10 +60,10 @@
             class="p-button-warning mr-2"
           />
           <Button
+            v-else
             icon="pi pi-eye"
             label="Voir Emojis"
             @click="viewEmojis(slotProps.data)"
-            :disabled="slotProps.data.status !== 'Connecté'"
             size="small"
           />
         </template>
@@ -111,11 +111,9 @@
 interface Integration {
   type: string;
   status: string;
-  name?: string; // e.g., Slack team name or GitLab group name/path
-  teamId?: string; // For Slack
-  groupPath?: string; // For GitLab - this will be the specific group path
-  // Add a unique key for DataTable if type + groupPath/teamId isn't sufficiently unique
-  // For instance, if a user could add the same GitLab group twice (though current logic prevents this)
+  name?: string;
+  teamId?: string;
+  groupPath?: string;
   key?: string;
 }
 const props = defineProps<{

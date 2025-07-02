@@ -4,20 +4,36 @@
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
       <div>
-        <label for="slackToken" class="block text-sm font-medium text-gray-700">Slack Access Token</label>
-        <input type="password" id="slackToken" v.model="slackToken" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Slack Token">
+        <label for="slackConnection" class="block text-sm font-medium text-gray-700">Select Slack Team</label>
+        <select
+          id="slackConnection"
+          v-model="selectedSlackConnectionId"
+          class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          :disabled="props.slackConnections.length === 0 || isSyncing"
+        >
+          <option :value="null" disabled>
+            {{ props.slackConnections.length === 0 ? 'No Slack connections available' : 'Select a Slack Team...' }}
+          </option>
+          <option v-for="conn in props.slackConnections" :key="conn.id" :value="conn.id">
+            {{ conn.name }} ({{ conn.teamId }})
+          </option>
+        </select>
       </div>
       <div>
-        <label for="slackTeamId" class="block text-sm font-medium text-gray-700">Slack Team ID</label>
-        <input type="text" id="slackTeamId" v.model="slackTeamId" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="Slack Team ID (e.g., T12345)">
-      </div>
-      <div>
-        <label for="gitlabToken" class="block text-sm font-medium text-gray-700">GitLab Access Token</label>
-        <input type="password" id="gitlabToken" v.model="gitlabToken" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="GitLab Token">
-      </div>
-      <div>
-        <label for="gitlabGroupPath" class="block text-sm font-medium text-gray-700">GitLab Group Path</label>
-        <input type="text" id="gitlabGroupPath" v.model="gitlabGroupPath" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm" placeholder="your-group/your-subgroup">
+        <label for="gitlabConnection" class="block text-sm font-medium text-gray-700">Select GitLab Group</label>
+        <select
+          id="gitlabConnection"
+          v-model="selectedGitlabConnectionId"
+          class="mt-1 block w-full px-3 py-2 border border-gray-300 bg-white rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm"
+          :disabled="props.gitlabConnections.length === 0 || isSyncing"
+        >
+          <option :value="null" disabled>
+            {{ props.gitlabConnections.length === 0 ? 'No GitLab connections available' : 'Select a GitLab Group...' }}
+          </option>
+          <option v-for="conn in props.gitlabConnections" :key="conn.id" :value="conn.id">
+            {{ conn.name }} ({{ conn.groupPath }})
+          </option>
+        </select>
       </div>
     </div>
 
@@ -63,7 +79,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, PropType } from 'vue';
 
 interface SyncMessage {
   type: 'info' | 'progress' | 'success' | 'error' | 'skipped' | 'warning' | 'summary' | 'done';
@@ -74,25 +90,58 @@ interface SyncMessage {
   counts?: { success: number; skipped: number; errors: number; total?: number };
 }
 
-const slackToken = ref(''); // Populate from store or props in a real app
-const slackTeamId = ref(''); // Populate from store or props
-const gitlabToken = ref(''); // Populate from store or props
-const gitlabGroupPath = ref(''); // Populate from store or props
+interface SlackConnection {
+  id: string; // Could be teamId or a unique ID for the connection
+  name: string; // User-friendly name, e.g., Slack Team Name
+  token: string;
+  teamId: string;
+}
+
+interface GitLabConnection {
+  id: string; // Could be groupPath or a unique ID
+  name: string; // User-friendly name, e.g., GitLab Group Name
+  token: string;
+  groupPath: string;
+}
+
+const props = defineProps({
+  slackConnections: {
+    type: Array as PropType<SlackConnection[]>,
+    default: () => []
+  },
+  gitlabConnections: {
+    type: Array as PropType<GitLabConnection[]>,
+    default: () => []
+  }
+});
+
+const selectedSlackConnectionId = ref<string | null>(null);
+const selectedGitlabConnectionId = ref<string | null>(null);
 
 const isSyncing = ref(false);
 const syncMessages = ref<SyncMessage[]>([]);
-const eventSource = ref<EventSource | null>(null);
+// eventSource ref is not used with fetch streaming, can be removed if not planning to switch
+// const eventSource = ref<EventSource | null>(null);
 const overallProgress = ref(0);
 let totalEmojisToProcess = 0;
 let processedEmojis = 0;
 
+const selectedSlackConnection = computed(() => {
+  if (!selectedSlackConnectionId.value) return null;
+  return props.slackConnections.find(sc => sc.id === selectedSlackConnectionId.value) || null;
+});
+
+const selectedGitlabConnection = computed(() => {
+  if (!selectedGitlabConnectionId.value) return null;
+  return props.gitlabConnections.find(gc => gc.id === selectedGitlabConnectionId.value) || null;
+});
 
 const startSync = async () => {
   if (isSyncing.value) return;
 
-  // Basic validation
-  if (!slackToken.value || !slackTeamId.value || !gitlabToken.value || !gitlabGroupPath.value) {
-    syncMessages.value.push({ type: 'error', message: 'Please fill in all required fields.' });
+  // Validation
+  if (!selectedSlackConnection.value || !selectedGitlabConnection.value) {
+    syncMessages.value.push({ type: 'error', message: 'Please select a Slack team and a GitLab group.' });
     return;
   }
 
@@ -145,6 +194,17 @@ const startSync = async () => {
   // The most straightforward change is to make the backend endpoint GET and pass params in URL.
   // Or, use fetch API to stream the response from the POST request.
 
+  // Get the selected connection details
+  const currentSlackConn = selectedSlackConnection.value;
+  const currentGitlabConn = selectedGitlabConnection.value;
+
+  // This check is already at the beginning of startSync, but good for type safety here
+  if (!currentSlackConn || !currentGitlabConn) {
+    syncMessages.value.push({ type: 'error', message: 'Internal error: Connection details not found after selection.' });
+    isSyncing.value = false;
+    return;
+  }
+
   // Let's use fetch for streaming response from POST
   try {
     const response = await fetch(`${backendUrl}/sync/slack-to-gitlab`, {
@@ -154,10 +214,10 @@ const startSync = async () => {
         // 'Accept': 'text/event-stream' // Server should set Content-Type
       },
       body: JSON.stringify({
-        slackToken: slackToken.value,
-        slackTeamId: slackTeamId.value,
-        gitlabToken: gitlabToken.value,
-        gitlabGroupPath: gitlabGroupPath.value,
+        slackToken: currentSlackConn.token,
+        slackTeamId: currentSlackConn.teamId,
+        gitlabToken: currentGitlabConn.token,
+        gitlabGroupPath: currentGitlabConn.groupPath,
       }),
     });
 

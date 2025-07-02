@@ -16,6 +16,7 @@ interface Integration {
   teamId?: string; // For Slack
   groupPath?: string; // For GitLab - this will be the specific group path
   key: string; // Unique key for Vue list rendering, e.g., "gitlab-group/path"
+  accessToken?: string; // Optional, if you want to store the token in the integration object
 }
 const integrations = ref<Integration[]>([]);
 const isLoading = ref(true);
@@ -113,6 +114,7 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
             name: groupPath, // Display the group path as its name
             groupPath: groupPath,
             key: `gitlab-${groupPath}`,
+            accessToken: gitlabStorageData.access_token, // Include access token if needed
           };
         } else {
           // If needsReAuthentication is true, or any other error
@@ -125,6 +127,7 @@ async function checkAllGitLabGroupStatuses(): Promise<Integration[]> {
             name: groupPath,
             groupPath: groupPath,
             key: `gitlab-${groupPath}`,
+            accessToken: gitlabStorageData.access_token, // Include access token if needed
           };
         }
       } catch (e) {
@@ -200,6 +203,7 @@ async function checkSlackStatus(): Promise<Integration | null> {
         name: data.team?.name || slackStorageData.team?.name || teamId, // Prefer fresh name from auth.test
         teamId: teamId,
         key: `slack-${teamId}`,
+        accessToken: accessToken, // Include access token if needed
       };
     } else {
       // If backend indicates disconnection (e.g. token invalid from auth.test)

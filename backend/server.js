@@ -4,6 +4,7 @@ import cors from 'cors';
 
 import gitlabRouter from './integrations/gitlab/controller.js';
 import slackRouter from './integrations/slack/controller.js';
+import syncRouter from './sync/controller.js'; // Import the new sync router
 import { emojis } from './store.js';
 
 dotenv.config();
@@ -16,6 +17,7 @@ app.use(express.json());
 
 app.use('/gitlab', gitlabRouter);
 app.use('/slack', slackRouter);
+app.use('/sync', syncRouter); // Use the new sync router
 
 app.get('/debug', (req, res) => {
   res.json({

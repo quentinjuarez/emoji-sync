@@ -87,77 +87,27 @@
       Aucune intégration pour le moment. Cliquez sur "Ajouter une intégration".
     </div>
 
-    <Dialog
-      v-model:visible="emojiDialogVisible"
-      modal
-      header="Emojis"
-      :style="{ width: '50vw' }"
-    >
-      <Message
-        v-if="deleteAllSuccessMessage"
-        severity="success"
-        :closable="false"
-        >{{ deleteAllSuccessMessage }}</Message
-      >
-      <Message v-if="deleteAllError" severity="error" :closable="false">{{
-        deleteAllError
-      }}</Message>
-
-      <div v-if="isLoadingEmojis" class="text-center p-4">
-        <ProgressSpinner style="width: 50px; height: 50px" strokeWidth="8" />
-        <p>Chargement des emojis...</p>
-      </div>
-      <div
-        v-else-if="displayedEmojis.length > 0"
-        class="grid grid-cols-6 gap-3 max-h-[400px] overflow-auto mt-4"
-      >
-        <div
-          v-for="{ url, name } in displayedEmojis"
-          :key="name"
-          class="text-center border p-2 rounded"
-        >
-          <img :src="url" :alt="name" class="w-10 h-10 mx-auto" />
-          <div class="text-xs mt-1 truncate">{{ name }}</div>
-        </div>
-      </div>
-      <div
-        v-else-if="
-          !isLoadingEmojis &&
-          displayedEmojis.length === 0 &&
-          !deleteAllSuccessMessage
-        "
-        class="text-center text-gray-500 py-4"
-      >
-        Aucun emoji personnalisé trouvé pour cette intégration.
-      </div>
-
-      <template #footer>
-        <Button
-          v-if="
-            currentIntegration?.type === 'gitlab' &&
-            displayedEmojis.length > 0 &&
-            !deleteAllSuccessMessage
-          "
-          label="Supprimer tous les Emojis GitLab"
-          icon="pi pi-trash"
-          class="p-button-danger"
-          @click="deleteAllGitLabEmojis"
-          :loading="isDeletingAllEmojis"
-        />
-      </template>
-    </Dialog>
+    <IntegrationEmojisDialog
+      :integration="selectedIntegrationForEmojis"
+      v-model:visible="isEmojiDialogVisible"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
+import { ref, defineEmits } from 'vue';
+// Assuming Integration and Emoji types are globally available or auto-imported
+import IntegrationEmojisDialog from './IntegrationEmojisDialog.vue';
+
 const props = defineProps<{
   integrations: Integration[];
 }>();
 
+const emit = defineEmits(['delete-integration']);
+
 const selectedIntegration = ref();
-const displayedEmojis = ref<Emoji[]>([]);
-const emojiDialogVisible = ref(false);
-const isLoadingEmojis = ref(false); // To show loading state in the dialog
+const isEmojiDialogVisible = ref(false);
+const selectedIntegrationForEmojis = ref<Integration | null>(null);
 
 const integrationOptions = [
   { label: 'Slack', value: 'slack' },
@@ -184,188 +134,9 @@ function onAddIntegration() {
   }
 }
 
-// Generic function to get token from localStorage
-function getGitLabTokenData() {
-  const gitlabDataString = localStorage.getItem('gitlabData');
-  if (!gitlabDataString) return null;
-  try {
-    return JSON.parse(gitlabDataString);
-  } catch (e) {
-    console.error('Error parsing gitlabData:', e);
-    localStorage.removeItem('gitlabData'); // Clear corrupted data
-    return null;
-  }
-}
-
-// Helper function to get Slack token data from localStorage
-function getSlackTokenData() {
-  const slackDataString = localStorage.getItem('slackData');
-  if (!slackDataString) return null;
-  try {
-    const parsed = JSON.parse(slackDataString);
-    // Basic validation: check for 'ok' and 'access_token'
-    if (parsed && parsed.ok && parsed.access_token) {
-      return parsed;
-    }
-    console.warn(
-      'Stored slackData is invalid or missing access_token.',
-      parsed
-    );
-    localStorage.removeItem('slackData'); // Clear corrupted/invalid data
-    return null;
-  } catch (e) {
-    console.error('Error parsing slackData:', e);
-    localStorage.removeItem('slackData'); // Clear corrupted data
-    return null;
-  }
-}
-
-async function fetchSlackEmojis(teamId: string) {
-  const tokenData = getSlackTokenData();
-  if (!tokenData || !tokenData.access_token) {
-    throw new Error('Slack token not found or invalid in localStorage.');
-  }
-
-  const res = await fetch(
-    `${import.meta.env.VITE_BACK_URL}/slack/emojis?teamId=${encodeURIComponent(
-      teamId
-    )}`,
-    {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-      },
-    }
-  );
-  if (!res.ok) {
-    if (res.status === 401) {
-      throw new Error(
-        'Unauthorized to fetch Slack emojis. Token might be expired or invalid.'
-      );
-    }
-    const errorData = await res.text();
-    throw new Error(
-      `Failed to fetch Slack emojis for team ${teamId}: ${res.status} ${errorData}`
-    );
-  }
-  return await res.json();
-}
-
-async function fetchGitlabEmojis(groupPath: string) {
-  const tokenData = getGitLabTokenData();
-  if (!tokenData || !tokenData.access_token) {
-    throw new Error('GitLab token not found in localStorage.');
-  }
-
-  const res = await fetch(
-    `${
-      import.meta.env.VITE_BACK_URL
-    }/gitlab/emojis?groupPath=${encodeURIComponent(groupPath)}`,
-    {
-      headers: {
-        Authorization: `Bearer ${tokenData.access_token}`,
-      },
-    }
-  );
-  if (!res.ok) {
-    if (res.status === 401) {
-      throw new Error(
-        'Unauthorized to fetch GitLab emojis. Token might be expired.'
-      );
-    }
-    const errorData = await res.text();
-    throw new Error(
-      `Failed to fetch GitLab emojis for ${groupPath}: ${res.status} ${errorData}`
-    );
-  }
-  return await res.json();
-}
-
-async function viewEmojis(integration: Integration) {
-  displayedEmojis.value = [];
-  currentIntegration.value = integration; // Store the integration
-  emojiDialogVisible.value = true;
-  isLoadingEmojis.value = true;
-  deleteAllError.value = ''; // Clear previous errors
-  deleteAllSuccessMessage.value = '';
-
-  try {
-    if (integration.type === 'slack' && integration.id) {
-      displayedEmojis.value = await fetchSlackEmojis(integration.id);
-    } else if (integration.type === 'gitlab' && integration.id) {
-      displayedEmojis.value = await fetchGitlabEmojis(integration.id);
-    } else {
-      throw new Error(
-        'Integration type or required ID (teamId/groupPath) is missing.'
-      );
-    }
-  } catch (error) {
-    console.error('Error fetching emojis:', error);
-    displayedEmojis.value = [];
-    // Optionally, display this error in the dialog
-  } finally {
-    isLoadingEmojis.value = false;
-  }
-}
-
-const currentIntegration = ref<Integration | null>(null); // To store the integration for which emojis are being viewed/deleted
-const isDeletingAllEmojis = ref(false);
-const deleteAllError = ref('');
-const deleteAllSuccessMessage = ref('');
-
-async function deleteAllGitLabEmojis() {
-  if (
-    !currentIntegration.value ||
-    currentIntegration.value.type !== 'gitlab' ||
-    !currentIntegration.value.id
-  ) {
-    deleteAllError.value =
-      'Cannot delete emojis: No GitLab integration selected or groupPath is missing.';
-    return;
-  }
-
-  isDeletingAllEmojis.value = true;
-  deleteAllError.value = '';
-  deleteAllSuccessMessage.value = '';
-
-  const tokenData = getGitLabTokenData();
-  if (!tokenData || !tokenData.access_token) {
-    deleteAllError.value =
-      'GitLab token not found in localStorage. Please reconnect.';
-    isDeletingAllEmojis.value = false;
-    return;
-  }
-
-  try {
-    const res = await fetch(
-      `${import.meta.env.VITE_BACK_URL}/gitlab/emojis/all`,
-      {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${tokenData.access_token}`,
-        },
-        body: JSON.stringify({ groupPath: currentIntegration.value.id }),
-      }
-    );
-
-    const result = await res.json();
-
-    if (!res.ok) {
-      throw new Error(
-        result.error || `Failed to delete all emojis: ${res.statusText}`
-      );
-    }
-
-    deleteAllSuccessMessage.value =
-      result.message || 'All emojis deleted successfully.';
-    displayedEmojis.value = [];
-  } catch (error: any) {
-    console.error('Error deleting all GitLab emojis:', error);
-    deleteAllError.value =
-      error.message || 'An unknown error occurred while deleting emojis.';
-  } finally {
-    isDeletingAllEmojis.value = false;
-  }
+function viewEmojis(integration: Integration) {
+  selectedIntegrationForEmojis.value = integration;
+  isEmojiDialogVisible.value = true;
 }
 
 function getSeverity(integration: Integration) {

@@ -14,6 +14,7 @@ declare module 'vue' {
     Dialog: typeof import('primevue/dialog')['default']
     Dropdown: typeof import('primevue/dropdown')['default']
     IntegrationDebug: typeof import('./../components/IntegrationDebug.vue')['default']
+    IntegrationEmojisDialog: typeof import('./../components/IntegrationEmojisDialog.vue')['default']
     Integrations: typeof import('./../components/Integrations.vue')['default']
     IntegrationSync: typeof import('./../components/IntegrationSync.vue')['default']
     IntegrationTable: typeof import('./../components/IntegrationTable.vue')['default']

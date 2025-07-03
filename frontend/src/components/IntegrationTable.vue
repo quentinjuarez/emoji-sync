@@ -162,8 +162,6 @@ const reconnectIntegration = (integration: Integration) => {
   }
 };
 
-const emit = defineEmits(['delete-integration']);
-
 function deleteIntegration(integration: Integration) {
   emit('delete-integration', integration);
 }

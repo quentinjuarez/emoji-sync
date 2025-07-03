@@ -68,11 +68,6 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, defineProps, defineEmits } from 'vue';
-// Assuming Integration and Emoji types are globally available or auto-imported
-// If not, they would need to be imported from their definition file.
-// import type { Integration, Emoji } from '@/types/global'; // Example import
-
 const props = defineProps<{
   integration: Integration | null;
   visible: boolean;
@@ -209,7 +204,8 @@ async function loadEmojis() {
     console.error('Error fetching emojis in dialog:', error);
     // Display error in the dialog if needed, e.g., by setting a specific error ref
     // For now, just logging it. The empty state will be shown.
-    deleteAllError.value = (error as Error).message || "Erreur lors du chargement des emojis.";
+    deleteAllError.value =
+      (error as Error).message || 'Erreur lors du chargement des emojis.';
   } finally {
     isLoadingEmojis.value = false;
   }
@@ -297,14 +293,17 @@ watch(
 watch(
   () => props.integration,
   (newIntegration, oldIntegration) => {
-    if (props.visible && newIntegration && newIntegration.id !== oldIntegration?.id) {
+    if (
+      props.visible &&
+      newIntegration &&
+      newIntegration.id !== oldIntegration?.id
+    ) {
       loadEmojis();
     }
   },
   { deep: true } // Use deep watch if integration object might change internally
-                 // but ID remains the same, though less likely for this use case.
+  // but ID remains the same, though less likely for this use case.
 );
-
 </script>
 <style scoped>
 /* Scoped styles for the dialog if needed */
